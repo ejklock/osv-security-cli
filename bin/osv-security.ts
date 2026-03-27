@@ -1,55 +1,76 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
-import { writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { loadConfig, DEFAULT_CONFIG_PATH } from '../src/config/loader.js';
-import { generateConfigYaml } from '../src/config/generator.js';
-import { detectEnvironment } from '../src/environment/detector.js';
-import { runOrchestrator } from '../src/phases/orchestrator.js';
-import { generateConsolidatedReport } from '../src/report/consolidated.js';
-import { generateExecutiveReport, executiveReportFilename } from '../src/report/executive.js';
-import { runScanner } from '../src/phases/scanner.js';
-import { setLogLevel } from '../src/utils/logger.js';
-import { ConfigLoadError, GateValidationError, PhaseError } from '../src/utils/errors.js';
-import { prompt } from '../src/utils/prompt.js';
-import type { ConsolidatedReport } from '../src/types/report.js';
+import { Command } from "commander";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { loadConfig, DEFAULT_CONFIG_PATH } from "../src/config/loader.js";
+import { generateConfigYaml } from "../src/config/generator.js";
+import { detectEnvironment } from "../src/environment/detector.js";
+import { runOrchestrator } from "../src/phases/orchestrator.js";
+import { generateConsolidatedReport } from "../src/report/consolidated.js";
+import {
+  generateExecutiveReport,
+  executiveReportFilename,
+} from "../src/report/executive.js";
+import { runScanner } from "../src/phases/scanner.js";
+import { setLogLevel } from "../src/utils/logger.js";
+import {
+  ConfigLoadError,
+  GateValidationError,
+  PhaseError,
+} from "../src/utils/errors.js";
+import { prompt } from "../src/utils/prompt.js";
+import type { ConsolidatedReport } from "../src/types/report.js";
 
 const program = new Command();
 
 program
-  .name('osv-security')
-  .description('OSV vulnerability scanning and safe dependency update CLI')
-  .version('0.1.0');
+  .name("osv-security")
+  .description("OSV vulnerability scanning and safe dependency update CLI")
+  .version("0.1.4");
 
 const commonOptions = (cmd: Command) =>
   cmd
-    .option('-c, --config <path>', 'Path to project-config.yml', DEFAULT_CONFIG_PATH)
-    .option('--cwd <path>', 'Working directory', process.cwd())
-    .option('--dry-run', 'Show commands without executing', false)
-    .option('-v, --verbose', 'Verbose output', false)
-    .option('-q, --quiet', 'Suppress all output except errors and final report', false)
-    .option('--json', 'Output results as JSON', false)
-    .option('-o, --output <path>', 'Write report to file');
+    .option(
+      "-c, --config <path>",
+      "Path to project-config.yml",
+      DEFAULT_CONFIG_PATH,
+    )
+    .option("--cwd <path>", "Working directory", process.cwd())
+    .option("--dry-run", "Show commands without executing", false)
+    .option("-v, --verbose", "Verbose output", false)
+    .option(
+      "-q, --quiet",
+      "Suppress all output except errors and final report",
+      false,
+    )
+    .option("--json", "Output results as JSON", false)
+    .option("-o, --output <path>", "Write report to file");
 
 // init command
 program
-  .command('init')
-  .description('Generate a project-config.yml template in the current project')
-  .option('--project-name <name>', 'Project name')
-  .option('--client <name>', 'Client name')
-  .option('--execution <mode>', 'Execution mode: docker or local', 'docker')
-  .option('--docker-service <service>', 'Docker Compose service name', 'app')
-  .option('--docker-workdir <path>', 'Working directory inside the container (e.g. /var/www/html)')
-  .option('--php-version <version>', 'PHP version', '8.2')
-  .option('--laravel-version <version>', 'Laravel version', '10.x')
-  .option('--node-version <version>', 'Node.js version', '20.x')
-  .option('--test-command <cmd>', 'Test command', 'php artisan test --compact')
-  .option('--cwd <path>', 'Working directory', process.cwd())
-  .option('--output <path>', 'Output path (default: .github/agents/project-config.yml)')
-  .option('--force', 'Overwrite existing file', false)
+  .command("init")
+  .description("Generate a project-config.yml template in the current project")
+  .option("--project-name <name>", "Project name")
+  .option("--client <name>", "Client name")
+  .option("--execution <mode>", "Execution mode: docker or local", "docker")
+  .option("--docker-service <service>", "Docker Compose service name", "app")
+  .option(
+    "--docker-workdir <path>",
+    "Working directory inside the container (e.g. /var/www/html)",
+  )
+  .option("--php-version <version>", "PHP version", "8.2")
+  .option("--laravel-version <version>", "Laravel version", "10.x")
+  .option("--node-version <version>", "Node.js version", "20.x")
+  .option("--test-command <cmd>", "Test command", "php artisan test --compact")
+  .option("--cwd <path>", "Working directory", process.cwd())
+  .option(
+    "--output <path>",
+    "Output path (default: .github/agents/project-config.yml)",
+  )
+  .option("--force", "Overwrite existing file", false)
   .action(async (opts) => {
-    const { access, mkdir } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
+    const { access, mkdir } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
 
     const outputPath = opts.output
       ? resolve(opts.cwd, opts.output)
@@ -68,13 +89,14 @@ program
       }
     }
 
-    const projectName = opts.projectName ?? await prompt('Project name', 'My Laravel Project');
-    const client = opts.client ?? await prompt('Client name', 'Client Name');
+    const projectName =
+      opts.projectName ?? (await prompt("Project name", "My Laravel Project"));
+    const client = opts.client ?? (await prompt("Client name", "Client Name"));
 
     const yaml = generateConfigYaml({
       projectName,
       client,
-      execution: opts.execution as 'docker' | 'local',
+      execution: opts.execution as "docker" | "local",
       dockerService: opts.dockerService,
       dockerWorkdir: opts.dockerWorkdir,
       phpVersion: opts.phpVersion,
@@ -84,43 +106,51 @@ program
     });
 
     await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, yaml, 'utf-8');
+    await writeFile(outputPath, yaml, "utf-8");
     process.stdout.write(`Created: ${outputPath}\n`);
     process.stdout.write(`\nNext steps:\n`);
     process.stdout.write(`  1. Edit ${outputPath} to match your project\n`);
-    process.stdout.write(`  2. Review protected_packages — add any packages that must not be auto-upgraded\n`);
-    process.stdout.write(`  3. Run: osv-security scan --cwd <your-project-dir>\n`)
-    process.stdout.write(`     (config will be loaded from project-config.yml at project root by default)\n`);
+    process.stdout.write(
+      `  2. Review protected_packages — add any packages that must not be auto-upgraded\n`,
+    );
+    process.stdout.write(
+      `  3. Run: osv-security scan --cwd <your-project-dir>\n`,
+    );
+    process.stdout.write(
+      `     (config will be loaded from project-config.yml at project root by default)\n`,
+    );
   });
 
 // scan command
 commonOptions(
-  program
-    .command('scan')
-    .description('Run vulnerability scan only (Phase 1)'),
+  program.command("scan").description("Run vulnerability scan only (Phase 1)"),
 ).action(async (opts) => {
-  await runCommand('scan', opts);
+  await runCommand("scan", opts);
 });
 
 // fix command
 commonOptions(
   program
-    .command('fix')
-    .description('Run full workflow: scan + npm fix + composer fix')
-    .option('--phases <phases>', 'Comma-separated phases: scan,npm,composer,report', 'scan,npm,composer'),
+    .command("fix")
+    .description("Run full workflow: scan + npm fix + composer fix")
+    .option(
+      "--phases <phases>",
+      "Comma-separated phases: scan,npm,composer,report",
+      "scan,npm,composer",
+    ),
 ).action(async (opts) => {
-  await runCommand('fix', opts);
+  await runCommand("fix", opts);
 });
 
 // executive-report command
 commonOptions(
   program
-    .command('executive-report')
-    .description('Generate executive report (Phase 5)')
-    .requiredOption('--client <name>', 'Client name')
-    .requiredOption('--project <name>', 'Project name'),
+    .command("executive-report")
+    .description("Generate executive report (Phase 5)")
+    .requiredOption("--client <name>", "Client name")
+    .requiredOption("--project <name>", "Project name"),
 ).action(async (opts) => {
-  await runCommand('executive-report', opts);
+  await runCommand("executive-report", opts);
 });
 
 async function runCommand(
@@ -138,8 +168,8 @@ async function runCommand(
     project?: string;
   },
 ): Promise<void> {
-  if (opts.verbose) setLogLevel('debug');
-  if (opts.quiet) setLogLevel('error');
+  if (opts.verbose) setLogLevel("debug");
+  if (opts.quiet) setLogLevel("error");
 
   let exitCode = 0;
 
@@ -153,15 +183,18 @@ async function runCommand(
       config.runtime.docker_workdir,
     );
 
-    if (command === 'scan') {
+    if (command === "scan") {
       const scanResult = await runScanner(runner, config, opts.cwd);
-      const output = opts.json ? JSON.stringify(scanResult, null, 2) : formatScanSummary(scanResult);
+      const output = opts.json
+        ? JSON.stringify(scanResult, null, 2)
+        : formatScanSummary(scanResult);
       await writeOutput(output, opts.output);
-      if (scanResult.status === 'error') exitCode = 2;
-      else if (scanResult.php.breaking > 0 || scanResult.npm.breaking > 0) exitCode = 1;
-    } else if (command === 'fix') {
+      if (scanResult.status === "error") exitCode = 2;
+      else if (scanResult.php.breaking > 0 || scanResult.npm.breaking > 0)
+        exitCode = 1;
+    } else if (command === "fix") {
       const phases = opts.phases
-        ? (opts.phases.split(',') as ('scan' | 'npm' | 'composer' | 'report')[])
+        ? (opts.phases.split(",") as ("scan" | "npm" | "composer" | "report")[])
         : undefined;
 
       const result = await runOrchestrator(runner, config, {
@@ -175,7 +208,7 @@ async function runCommand(
       if (result.scan) {
         const report: ConsolidatedReport = {
           projectName: config.project.name,
-          date: new Date().toISOString().split('T')[0]!,
+          date: new Date().toISOString().split("T")[0]!,
           environment: runner.environment,
           scan: result.scan,
           npmUpdate: result.npmUpdate,
@@ -189,8 +222,8 @@ async function runCommand(
         await writeOutput(output, opts.output);
       }
 
-      if (result.overallStatus === 'error') exitCode = 1;
-    } else if (command === 'executive-report') {
+      if (result.overallStatus === "error") exitCode = 1;
+    } else if (command === "executive-report") {
       // Run full scan first, then generate executive report
       const scanBefore = await runScanner(runner, config, opts.cwd);
 
@@ -213,7 +246,7 @@ async function runCommand(
       });
 
       const filename = executiveReportFilename(opts.client!, opts.project!);
-      const reportDir = resolve(opts.cwd, '.osv-scanner/reports');
+      const reportDir = resolve(opts.cwd, ".osv-scanner/reports");
       const reportPath = opts.output ?? resolve(reportDir, filename);
 
       await writeOutput(report, reportPath);
@@ -231,7 +264,9 @@ async function runCommand(
       process.stderr.write(`Phase "${err.phase}" failed: ${err.message}\n`);
       exitCode = 2;
     } else {
-      process.stderr.write(`Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(
+        `Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
       exitCode = 2;
     }
   }
@@ -239,18 +274,20 @@ async function runCommand(
   process.exit(exitCode);
 }
 
-function formatScanSummary(scan: Awaited<ReturnType<typeof runScanner>>): string {
+function formatScanSummary(
+  scan: Awaited<ReturnType<typeof runScanner>>,
+): string {
   const lines: string[] = [
-    `## OSV Scan Report — ${new Date().toISOString().split('T')[0]}`,
+    `## OSV Scan Report — ${new Date().toISOString().split("T")[0]}`,
     `**Environment:** ${scan.environment}`,
-    '',
-    '### PHP (composer.lock)',
+    "",
+    "### PHP (composer.lock)",
     `- Total: ${scan.php.vulnerabilities_total}`,
     `- Auto-safe: ${scan.php.auto_safe}`,
     `- Breaking: ${scan.php.breaking}`,
     `- Manual: ${scan.php.manual}`,
-    '',
-    '### npm (package-lock.json)',
+    "",
+    "### npm (package-lock.json)",
     `- Total: ${scan.npm.vulnerabilities_total}`,
     `- Auto-safe: ${scan.npm.auto_safe}`,
     `- Breaking: ${scan.npm.breaking}`,
@@ -258,20 +295,23 @@ function formatScanSummary(scan: Awaited<ReturnType<typeof runScanner>>): string
   ];
 
   if (scan.error) {
-    lines.push('', `**Warning:** ${scan.error}`);
+    lines.push("", `**Warning:** ${scan.error}`);
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
-async function writeOutput(content: string, outputPath?: string): Promise<void> {
+async function writeOutput(
+  content: string,
+  outputPath?: string,
+): Promise<void> {
   if (outputPath) {
-    const { mkdir } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
+    const { mkdir } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
     await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, content, 'utf-8');
+    await writeFile(outputPath, content, "utf-8");
   } else {
-    process.stdout.write(content + '\n');
+    process.stdout.write(content + "\n");
   }
 }
 
