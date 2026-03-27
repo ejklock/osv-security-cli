@@ -16,5 +16,5 @@ coverage/
 .env
 .env.local
 
-# Generated config (user's project config — not committed to the CLI repo)
-project-config.yml
+# TypeScript incremental build
+*.tsbuildinfo
