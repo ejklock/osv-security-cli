@@ -1,0 +1,42 @@
+{
+  "name": "osv-security-cli",
+  "version": "0.1.0",
+  "description": "CLI tool for automated OSV vulnerability scanning and safe dependency updates",
+  "type": "module",
+  "bin": {
+    "osv-security": "./dist/bin/osv-security.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx bin/osv-security.ts",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "execa": "^9.3.1",
+    "semver": "^7.6.3",
+    "yaml": "^2.5.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.37",
+    "@types/semver": "^7.5.8",
+    "tsup": "^8.2.4",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

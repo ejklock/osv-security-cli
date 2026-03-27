@@ -1,0 +1,25 @@
+{
+  "$schema": "osv-scan-result/v1",
+  "agent": "osv-scanner",
+  "status": "error",
+  "environment": "docker",
+  "php": {
+    "vulnerabilities_total": 0,
+    "auto_safe": 0,
+    "breaking": 0,
+    "manual": 0,
+    "auto_safe_packages": [],
+    "breaking_packages": [],
+    "manual_packages": []
+  },
+  "npm": {
+    "vulnerabilities_total": 0,
+    "auto_safe": 0,
+    "breaking": 0,
+    "manual": 0,
+    "auto_safe_packages": [],
+    "breaking_packages": [],
+    "manual_packages": []
+  },
+  "error": "osv-scanner not found in container"
+}

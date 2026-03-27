@@ -1,0 +1,11 @@
+{
+  "$schema": "osv-update-result/v1",
+  "agent": "composer-safe-update",
+  "status": "success",
+  "packages_updated": ["vendor/safe-package@1.2.4"],
+  "packages_skipped": [],
+  "packages_pending_breaking": ["laravel/framework@10.0.0"],
+  "tests": "pass",
+  "tests_detail": "42 tests passed, 0 failed",
+  "error": null
+}

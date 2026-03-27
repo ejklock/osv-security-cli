@@ -1,0 +1,142 @@
+import type { CommandRunner, CommandResult } from '../types/common.js';
+import type { ProjectConfig } from '../types/config.js';
+import type { UpdateResultJson } from '../types/update.js';
+import type { ScanResultJson } from '../types/scan.js';
+import { PhaseError } from '../utils/errors.js';
+import { revertFiles, isWorkingTreeClean } from '../utils/git.js';
+import { logger } from '../utils/logger.js';
+import { OSV } from '../utils/osv-commands.js';
+
+const COMPOSER_FILES = ['composer.json', 'composer.lock'];
+
+function extractPackageNames(packageRefs: string[]): string[] {
+  return packageRefs.map((ref) => {
+    const atIndex = ref.lastIndexOf('@');
+    return atIndex > 0 ? ref.slice(0, atIndex) : ref;
+  });
+}
+
+async function checkCurrentState(runner: CommandRunner, cwd: string): Promise<void> {
+  logger.debug('Running composer outdated --direct (informational)...');
+  await runner.run('composer outdated --direct', { cwd });
+}
+
+async function applyComposerUpdate(
+  runner: CommandRunner,
+  packageNames: string[],
+  cwd: string,
+): Promise<CommandResult> {
+  const pkgList = packageNames.join(' ');
+  logger.info(`Updating packages: ${pkgList}`);
+  return runner.run(`composer update ${pkgList} --no-interaction`, { cwd });
+}
+
+async function runTestSuite(
+  runner: CommandRunner,
+  testCommand: string,
+  cwd: string,
+): Promise<CommandResult> {
+  logger.info(`Running tests: ${testCommand}`);
+  return runner.run(testCommand, { cwd });
+}
+
+async function revertComposerChanges(runner: CommandRunner, cwd: string): Promise<void> {
+  await revertFiles(runner, COMPOSER_FILES, cwd);
+  await runner.run('composer install --no-interaction', { cwd });
+}
+
+async function verifyResidualVulnerabilities(runner: CommandRunner, cwd: string): Promise<void> {
+  logger.info(`Running post-update OSV verification: ${OSV.scanPhp}`);
+  await runner.run(OSV.scanPhp, { cwd });
+}
+
+export async function runComposerUpdater(
+  runner: CommandRunner,
+  config: ProjectConfig,
+  scanResult: ScanResultJson,
+  cwd: string,
+): Promise<UpdateResultJson> {
+  logger.info('Phase 3: Running Composer safe updates...');
+
+  const base: UpdateResultJson = {
+    $schema: 'osv-update-result/v1',
+    agent: 'composer-safe-update',
+    status: 'success',
+    packages_updated: [],
+    packages_skipped: [],
+    packages_pending_breaking: scanResult.php.breaking_packages,
+    tests: 'skipped',
+    tests_detail: '',
+    error: null,
+  };
+
+  const autoSafePackageNames = extractPackageNames(scanResult.php.auto_safe_packages);
+
+  if (autoSafePackageNames.length === 0) {
+    return { ...base, tests_detail: 'No auto-safe packages to update' };
+  }
+
+  if (runner.dryRun) {
+    logger.info(`[DRY-RUN] Would execute: composer update ${autoSafePackageNames.join(' ')} --no-interaction`);
+    logger.info(`[DRY-RUN] Would execute: ${config.runtime.test_command}`);
+    logger.info(`[DRY-RUN] Would execute: ${OSV.scanPhp}`);
+    return {
+      ...base,
+      packages_updated: scanResult.php.auto_safe_packages,
+      tests_detail: 'Dry-run — not executed',
+    };
+  }
+
+  try {
+    const isClean = await isWorkingTreeClean(runner, COMPOSER_FILES, cwd);
+    if (!isClean) {
+      return {
+        ...base,
+        status: 'error',
+        error: 'composer.json or composer.lock has uncommitted changes — aborting to prevent data loss on revert',
+      };
+    }
+
+    await checkCurrentState(runner, cwd);
+
+    const updateResult = await applyComposerUpdate(runner, autoSafePackageNames, cwd);
+    if (updateResult.exitCode !== 0) {
+      return {
+        ...base,
+        status: 'error',
+        tests: 'skipped',
+        error: `composer update failed: ${updateResult.stderr}`,
+      };
+    }
+
+    const testResult = await runTestSuite(runner, config.runtime.test_command, cwd);
+    if (testResult.exitCode !== 0) {
+      logger.error('Tests failed — reverting Composer updates...');
+      await revertComposerChanges(runner, cwd);
+      return {
+        ...base,
+        status: 'error',
+        tests: 'fail',
+        tests_detail: testResult.stdout || testResult.stderr,
+        error: 'Tests failed after composer update — changes reverted',
+      };
+    }
+
+    await verifyResidualVulnerabilities(runner, cwd);
+
+    const testDetail = testResult.stdout.trim().split('\n').slice(-2).join(' ');
+
+    return {
+      ...base,
+      packages_updated: scanResult.php.auto_safe_packages,
+      tests: 'pass',
+      tests_detail: testDetail || 'Tests passed',
+    };
+  } catch (err) {
+    throw new PhaseError(
+      `Composer updater phase failed: ${err instanceof Error ? err.message : String(err)}`,
+      'composer-updater',
+      err,
+    );
+  }
+}

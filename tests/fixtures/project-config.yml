@@ -1,0 +1,39 @@
+project:
+  name: 'Test Laravel Project'
+  client: 'Test Client'
+
+runtime:
+  php: '8.1'
+  laravel: '10.x'
+  node: '20.x'
+  package_manager_php: 'composer'
+  package_manager_js: 'npm'
+  execution: 'docker'
+  docker_service: 'app'
+  test_command: 'php artisan test --compact'
+  build_commands:
+    frontend: 'npm run development-frontend'
+    backend: 'npm run development-backend'
+
+protected_packages:
+  composer:
+    - package: 'laravel/framework'
+      constraint: '^10.8'
+      reason: 'Major upgrade to Laravel 11 requires a dedicated project'
+    - package: 'livewire/livewire'
+      constraint: '^2.12'
+      reason: 'Livewire 3 has breaking API changes'
+  npm:
+    - package: 'alpinejs'
+      constraint: '^3.10.2'
+      reason: 'Alpine v4 may have breaking syntax changes'
+    - package: 'tailwindcss'
+      constraint: '^3.3.3'
+      reason: 'Tailwind v4 has breaking config and migration requirements'
+
+safe_update_policy:
+  allow_patch_and_minor_within_constraints: true
+  require_authorization_for_constraint_change: true
+  authorization_format: 'sim, confirmo breaking changes para [vendor/pacote]'
+
+conflict_resolution: 'stop_and_ask'

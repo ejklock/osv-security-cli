@@ -1,0 +1,20 @@
+node_modules/
+dist/
+coverage/
+
+# OSV scanner output
+.osv-scanner/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Env
+.env
+.env.local
+
+# Generated config (user's project config — not committed to the CLI repo)
+project-config.yml

@@ -1,0 +1,13 @@
+{
+  "$schema": "osv-update-result/v1",
+  "agent": "npm-safe-update",
+  "status": "success",
+  "packages_updated": ["lodash@4.17.21"],
+  "packages_skipped": [],
+  "packages_pending_breaking": [],
+  "tests": "skipped",
+  "tests_detail": "Build validated; unit tests not applicable to npm phase",
+  "build_status": "pass",
+  "build_detail": "Frontend and backend builds passed after update",
+  "error": null
+}
