@@ -28,7 +28,7 @@ async function applyComposerUpdate(
 ): Promise<CommandResult> {
   const pkgList = packageNames.join(' ');
   logger.info(`Updating packages: ${pkgList}`);
-  return runner.run(`composer update ${pkgList} --no-interaction`, { cwd });
+  return runner.run(`composer update ${pkgList} --with-all-dependencies --no-interaction`, { cwd });
 }
 
 async function runTestSuite(
