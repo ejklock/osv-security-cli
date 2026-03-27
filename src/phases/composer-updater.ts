@@ -3,7 +3,7 @@ import type { ProjectConfig } from '../types/config.js';
 import type { UpdateResultJson } from '../types/update.js';
 import type { ScanResultJson } from '../types/scan.js';
 import { PhaseError } from '../utils/errors.js';
-import { revertFiles, isWorkingTreeClean } from '../utils/git.js';
+import { backupFiles, restoreFiles } from '../utils/git.js';
 import { logger } from '../utils/logger.js';
 import { OSV } from '../utils/osv-commands.js';
 
@@ -40,8 +40,12 @@ async function runTestSuite(
   return runner.run(testCommand, { cwd });
 }
 
-async function revertComposerChanges(runner: CommandRunner, cwd: string): Promise<void> {
-  await revertFiles(runner, COMPOSER_FILES, cwd);
+async function revertComposerChanges(
+  runner: CommandRunner,
+  backups: Map<string, string>,
+  cwd: string,
+): Promise<void> {
+  await restoreFiles(backups, cwd);
   await runner.run('composer install --no-interaction', { cwd });
 }
 
@@ -88,14 +92,7 @@ export async function runComposerUpdater(
   }
 
   try {
-    const isClean = await isWorkingTreeClean(runner, COMPOSER_FILES, cwd);
-    if (!isClean) {
-      return {
-        ...base,
-        status: 'error',
-        error: 'composer.json or composer.lock has uncommitted changes — aborting to prevent data loss on revert',
-      };
-    }
+    const backups = await backupFiles(COMPOSER_FILES, cwd);
 
     await checkCurrentState(runner, cwd);
 
@@ -112,7 +109,7 @@ export async function runComposerUpdater(
     const testResult = await runTestSuite(runner, config.runtime.test_command, cwd);
     if (testResult.exitCode !== 0) {
       logger.error('Tests failed — reverting Composer updates...');
-      await revertComposerChanges(runner, cwd);
+      await revertComposerChanges(runner, backups, cwd);
       return {
         ...base,
         status: 'error',

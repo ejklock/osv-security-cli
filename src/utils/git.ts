@@ -1,29 +1,27 @@
-import type { CommandRunner } from '../types/common.js';
-import { LocalExecutor } from '../executor/local-executor.js';
+import { copyFile, readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
-// Git commands always run on the host, never inside Docker
-function localRunner(dryRun: boolean): CommandRunner {
-  return new LocalExecutor({ dryRun });
+export async function backupFiles(
+  files: string[],
+  cwd: string,
+): Promise<Map<string, string>> {
+  const backups = new Map<string, string>();
+  for (const file of files) {
+    try {
+      const content = await readFile(resolve(cwd, file), 'utf-8');
+      backups.set(file, content);
+    } catch {
+      // file doesn't exist — nothing to back up
+    }
+  }
+  return backups;
 }
 
-export async function revertFiles(
-  runner: CommandRunner,
-  files: string[],
+export async function restoreFiles(
+  backups: Map<string, string>,
   cwd: string,
 ): Promise<void> {
-  if (files.length === 0) return;
-  const fileList = files.join(' ');
-  await localRunner(runner.dryRun).run(`git checkout -- ${fileList}`, { cwd });
-}
-
-export async function isWorkingTreeClean(
-  runner: CommandRunner,
-  files: string[],
-  cwd: string,
-): Promise<boolean> {
-  const result = await localRunner(runner.dryRun).run(
-    `git status --porcelain -- ${files.join(' ')}`,
-    { cwd },
-  );
-  return result.exitCode === 0 && result.stdout.trim() === '';
+  for (const [file, content] of backups) {
+    await writeFile(resolve(cwd, file), content, 'utf-8');
+  }
 }

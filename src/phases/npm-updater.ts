@@ -3,7 +3,7 @@ import type { ProjectConfig } from '../types/config.js';
 import type { UpdateResultJson } from '../types/update.js';
 import type { ScanResultJson } from '../types/scan.js';
 import { PhaseError } from '../utils/errors.js';
-import { revertFiles, isWorkingTreeClean } from '../utils/git.js';
+import { backupFiles, restoreFiles } from '../utils/git.js';
 import { logger } from '../utils/logger.js';
 import { OSV } from '../utils/osv-commands.js';
 
@@ -40,8 +40,12 @@ async function validateBuilds(
   return { frontend, backend };
 }
 
-async function revertNpmChanges(runner: CommandRunner, cwd: string): Promise<void> {
-  await revertFiles(runner, NPM_FILES, cwd);
+async function revertNpmChanges(
+  runner: CommandRunner,
+  backups: Map<string, string>,
+  cwd: string,
+): Promise<void> {
+  await restoreFiles(backups, cwd);
   await runner.run('npm install', { cwd });
 }
 
@@ -82,14 +86,7 @@ export async function runNpmUpdater(
   }
 
   try {
-    const isClean = await isWorkingTreeClean(runner, NPM_FILES, cwd);
-    if (!isClean) {
-      return {
-        ...base,
-        status: 'error',
-        error: 'package.json or package-lock.json has uncommitted changes — aborting to prevent data loss on revert',
-      };
-    }
+    const backups = await backupFiles(NPM_FILES, cwd);
 
     await checkCurrentState(runner, cwd);
     await applyOsvFix(runner, cwd);
@@ -108,7 +105,7 @@ export async function runNpmUpdater(
 
     if (frontend.exitCode !== 0) {
       logger.error('Frontend build failed — reverting...');
-      await revertNpmChanges(runner, cwd);
+      await revertNpmChanges(runner, backups, cwd);
       return {
         ...base,
         status: 'error',
@@ -120,7 +117,7 @@ export async function runNpmUpdater(
 
     if (backend.exitCode !== 0) {
       logger.error('Backend build failed — reverting...');
-      await revertNpmChanges(runner, cwd);
+      await revertNpmChanges(runner, backups, cwd);
       return {
         ...base,
         status: 'error',
