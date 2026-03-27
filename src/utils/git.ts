@@ -1,4 +1,10 @@
 import type { CommandRunner } from '../types/common.js';
+import { LocalExecutor } from '../executor/local-executor.js';
+
+// Git commands always run on the host, never inside Docker
+function localRunner(dryRun: boolean): CommandRunner {
+  return new LocalExecutor({ dryRun });
+}
 
 export async function revertFiles(
   runner: CommandRunner,
@@ -7,7 +13,7 @@ export async function revertFiles(
 ): Promise<void> {
   if (files.length === 0) return;
   const fileList = files.join(' ');
-  await runner.run(`git checkout -- ${fileList}`, { cwd });
+  await localRunner(runner.dryRun).run(`git checkout -- ${fileList}`, { cwd });
 }
 
 export async function isWorkingTreeClean(
@@ -15,6 +21,9 @@ export async function isWorkingTreeClean(
   files: string[],
   cwd: string,
 ): Promise<boolean> {
-  const result = await runner.run(`git status --porcelain -- ${files.join(' ')}`, { cwd });
+  const result = await localRunner(runner.dryRun).run(
+    `git status --porcelain -- ${files.join(' ')}`,
+    { cwd },
+  );
   return result.exitCode === 0 && result.stdout.trim() === '';
 }
