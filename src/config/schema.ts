@@ -15,11 +15,11 @@ const RuntimeConfigSchema = z.object({
   execution: z.enum(['docker', 'local']),
   docker_service: z.string(),
   docker_workdir: z.string().optional(),
-  test_command: z.string(),
+  test_command: z.string().optional(),
   build_commands: z.object({
     frontend: z.string(),
     backend: z.string(),
-  }),
+  }).optional(),
 });
 
 const SafeUpdatePolicySchema = z.object({

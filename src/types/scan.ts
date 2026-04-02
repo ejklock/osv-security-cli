@@ -5,9 +5,11 @@ export interface VulnerabilityEntry {
   package: string;
   currentVersion: string;
   safeVersion: string | null;
-  severity: string;
-  cve: string;
+  cvss: string;
+  ghsaId: string;
+  risk: string;
   classification: VulnerabilityClass;
+  reason: string;
 }
 
 export interface EcosystemScanResult {
@@ -18,6 +20,7 @@ export interface EcosystemScanResult {
   auto_safe_packages: string[];
   breaking_packages: string[];
   manual_packages: string[];
+  vulnerabilities: VulnerabilityEntry[];
 }
 
 export interface ScanResultJson {

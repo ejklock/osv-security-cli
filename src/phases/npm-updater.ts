@@ -79,10 +79,12 @@ export async function runNpmUpdater(
   if (runner.dryRun) {
     logger.info(`[DRY-RUN] Would execute: ${OSV.fixNpm}`);
     logger.info('[DRY-RUN] Would execute: npm update');
-    logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.frontend}`);
-    logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.backend}`);
+    if (config.runtime.build_commands) {
+      logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.frontend}`);
+      logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.backend}`);
+    }
     logger.info(`[DRY-RUN] Would execute: ${OSV.scanNpm}`);
-    return { ...base, build_status: 'pass', build_detail: 'Dry-run — not executed' };
+    return { ...base, build_status: config.runtime.build_commands ? 'pass' : 'skipped', build_detail: 'Dry-run — not executed' };
   }
 
   try {
@@ -101,30 +103,38 @@ export async function runNpmUpdater(
       };
     }
 
-    const { frontend, backend } = await validateBuilds(runner, config, cwd);
+    let buildStatus: UpdateResultJson['build_status'] = 'skipped';
+    let buildDetail = 'No build_commands configured — skipped';
 
-    if (frontend.exitCode !== 0) {
-      logger.error('Frontend build failed — reverting...');
-      await revertNpmChanges(runner, backups, cwd);
-      return {
-        ...base,
-        status: 'error',
-        build_status: 'fail',
-        build_detail: `Frontend build failed: ${frontend.stderr}`,
-        error: 'Frontend build failed after npm update — changes reverted',
-      };
-    }
+    if (config.runtime.build_commands) {
+      const { frontend, backend } = await validateBuilds(runner, config, cwd);
 
-    if (backend.exitCode !== 0) {
-      logger.error('Backend build failed — reverting...');
-      await revertNpmChanges(runner, backups, cwd);
-      return {
-        ...base,
-        status: 'error',
-        build_status: 'fail',
-        build_detail: `Backend build failed: ${backend.stderr}`,
-        error: 'Backend build failed after npm update — changes reverted',
-      };
+      if (frontend.exitCode !== 0) {
+        logger.error('Frontend build failed — reverting...');
+        await revertNpmChanges(runner, backups, cwd);
+        return {
+          ...base,
+          status: 'error',
+          build_status: 'fail',
+          build_detail: `Frontend build failed: ${frontend.stderr}`,
+          error: 'Frontend build failed after npm update — changes reverted',
+        };
+      }
+
+      if (backend.exitCode !== 0) {
+        logger.error('Backend build failed — reverting...');
+        await revertNpmChanges(runner, backups, cwd);
+        return {
+          ...base,
+          status: 'error',
+          build_status: 'fail',
+          build_detail: `Backend build failed: ${backend.stderr}`,
+          error: 'Backend build failed after npm update — changes reverted',
+        };
+      }
+
+      buildStatus = 'pass';
+      buildDetail = 'Frontend and backend builds passed after update';
     }
 
     await verifyResidualVulnerabilities(runner, cwd);
@@ -132,8 +142,8 @@ export async function runNpmUpdater(
     return {
       ...base,
       packages_updated: scanResult.npm.auto_safe_packages,
-      build_status: 'pass',
-      build_detail: 'Frontend and backend builds passed after update',
+      build_status: buildStatus,
+      build_detail: buildDetail,
     };
   } catch (err) {
     throw new PhaseError(

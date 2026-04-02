@@ -132,12 +132,13 @@ commonOptions(
 commonOptions(
   program
     .command("fix")
-    .description("Run full workflow: scan + npm fix + composer fix")
+    .description("Run full workflow: scan + npm fix + composer fix + executive report")
     .option(
       "--phases <phases>",
       "Comma-separated phases: scan,npm,composer,report",
       "scan,npm,composer",
-    ),
+    )
+    .option("--no-report", "Skip executive report generation", false),
 ).action(async (opts) => {
   await runCommand("fix", opts);
 });
@@ -146,9 +147,9 @@ commonOptions(
 commonOptions(
   program
     .command("executive-report")
-    .description("Generate executive report (Phase 5)")
-    .requiredOption("--client <name>", "Client name")
-    .requiredOption("--project <name>", "Project name"),
+    .description("Generate executive report (reads client/project from config by default)")
+    .option("--client <name>", "Client name (default: from project-config.yml)")
+    .option("--project <name>", "Project name (default: from project-config.yml)"),
 ).action(async (opts) => {
   await runCommand("executive-report", opts);
 });
@@ -166,6 +167,7 @@ async function runCommand(
     phases?: string;
     client?: string;
     project?: string;
+    noReport?: boolean;
   },
 ): Promise<void> {
   if (opts.verbose) setLogLevel("debug");
@@ -197,6 +199,8 @@ async function runCommand(
         ? (opts.phases.split(",") as ("scan" | "npm" | "composer" | "report")[])
         : undefined;
 
+      const scanBefore = await runScanner(runner, config, opts.cwd);
+
       const result = await runOrchestrator(runner, config, {
         configPath: opts.config,
         cwd: opts.cwd,
@@ -222,9 +226,28 @@ async function runCommand(
         await writeOutput(output, opts.output);
       }
 
+      if (!opts.noReport) {
+        const scanAfter = await runScanner(runner, config, opts.cwd);
+        const execReport = generateExecutiveReport({
+          client: config.project.client,
+          project: config.project.name,
+          scanBefore,
+          scanAfter,
+          npmUpdate: result.npmUpdate,
+          composerUpdate: result.composerUpdate,
+        });
+        const filename = executiveReportFilename(config.project.client, config.project.name);
+        const reportDir = resolve(opts.cwd, ".osv-scanner/reports");
+        const reportPath = resolve(reportDir, filename);
+        await writeOutput(execReport, reportPath);
+        process.stdout.write(`Executive report saved to: ${reportPath}\n`);
+      }
+
       if (result.overallStatus === "error") exitCode = 1;
     } else if (command === "executive-report") {
-      // Run full scan first, then generate executive report
+      const client = opts.client ?? config.project.client;
+      const project = opts.project ?? config.project.name;
+
       const scanBefore = await runScanner(runner, config, opts.cwd);
 
       const orchestratorResult = await runOrchestrator(runner, config, {
@@ -237,15 +260,15 @@ async function runCommand(
       const scanAfter = await runScanner(runner, config, opts.cwd);
 
       const report = generateExecutiveReport({
-        client: opts.client!,
-        project: opts.project!,
+        client,
+        project,
         scanBefore,
         scanAfter,
         npmUpdate: orchestratorResult.npmUpdate,
         composerUpdate: orchestratorResult.composerUpdate,
       });
 
-      const filename = executiveReportFilename(opts.client!, opts.project!);
+      const filename = executiveReportFilename(client, project);
       const reportDir = resolve(opts.cwd, ".osv-scanner/reports");
       const reportPath = opts.output ?? resolve(reportDir, filename);
 

@@ -1,9 +1,10 @@
 import type { CommandRunner } from '../types/common.js';
 import type { ProjectConfig } from '../types/config.js';
-import type { ScanResultJson, EcosystemScanResult } from '../types/scan.js';
+import type { ScanResultJson, EcosystemScanResult, VulnerabilityEntry } from '../types/scan.js';
 import { PhaseError, EnvironmentError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { OSV } from '../utils/osv-commands.js';
+import { classifyPackage } from '../policy/safe-update.js';
 
 function emptyEcosystem(): EcosystemScanResult {
   return {
@@ -14,65 +15,101 @@ function emptyEcosystem(): EcosystemScanResult {
     auto_safe_packages: [],
     breaking_packages: [],
     manual_packages: [],
+    vulnerabilities: [],
   };
 }
 
-function extractSafeVersion(
-  vulnerabilities: Array<{
-    affected?: Array<{ ranges?: Array<{ events?: Array<{ fixed?: string }> }> }>;
-  }>,
-): string | null {
-  for (const vuln of vulnerabilities) {
-    for (const affected of vuln.affected ?? []) {
-      for (const range of affected.ranges ?? []) {
-        for (const event of range.events ?? []) {
-          if (event.fixed) return event.fixed;
-        }
+// Minimal CVSS v3 base score calculator from vector string
+// e.g. "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+function parseCvssBaseScore(score: string): string {
+  try {
+    const match = score.match(/CVSS:\d+\.\d+\/(.+)/);
+    if (!match) return '—';
+    const metrics: Record<string, string> = {};
+    for (const part of match[1]!.split('/')) {
+      const [k, v] = part.split(':');
+      if (k && v) metrics[k] = v;
+    }
+
+    const av = ({ N: 0.85, A: 0.62, L: 0.55, P: 0.2 })[metrics['AV'] ?? ''] ?? 0;
+    const ac = ({ L: 0.77, H: 0.44 })[metrics['AC'] ?? ''] ?? 0;
+    const scope = metrics['S'] === 'C';
+    const prMap = scope
+      ? { N: 0.85, L: 0.68, H: 0.50 }
+      : { N: 0.85, L: 0.62, H: 0.27 };
+    const pr = prMap[metrics['PR'] as keyof typeof prMap] ?? 0;
+    const ui = ({ N: 0.85, R: 0.62 })[metrics['UI'] ?? ''] ?? 0;
+    const impMap = { N: 0, L: 0.22, H: 0.56 };
+    const c = impMap[metrics['C'] as keyof typeof impMap] ?? 0;
+    const i = impMap[metrics['I'] as keyof typeof impMap] ?? 0;
+    const a = impMap[metrics['A'] as keyof typeof impMap] ?? 0;
+
+    const iscBase = 1 - (1 - c) * (1 - i) * (1 - a);
+    if (iscBase <= 0) return '0.0';
+
+    let isc: number;
+    if (!scope) {
+      isc = 6.42 * iscBase;
+    } else {
+      isc = 7.52 * (iscBase - 0.029) - 3.25 * Math.pow(iscBase - 0.02, 15);
+    }
+
+    const exploitability = 8.22 * av * ac * pr * ui;
+
+    let raw: number;
+    if (!scope) {
+      raw = Math.min(isc + exploitability, 10);
+    } else {
+      raw = Math.min(1.08 * (isc + exploitability), 10);
+    }
+
+    // Roundup: smallest value with one decimal place >= raw
+    const rounded = Math.ceil(raw * 10) / 10;
+    return rounded.toFixed(1);
+  } catch {
+    return '—';
+  }
+}
+
+function extractCvss(vuln: {
+  severity?: Array<{ type?: string; score?: string }>;
+}): string {
+  for (const s of vuln.severity ?? []) {
+    if (s.type === 'CVSS_V3' && s.score) {
+      return parseCvssBaseScore(s.score);
+    }
+  }
+  return '—';
+}
+
+function extractSafeVersionFromVuln(vuln: {
+  affected?: Array<{ ranges?: Array<{ events?: Array<{ fixed?: string }> }> }>;
+}): string | null {
+  for (const affected of vuln.affected ?? []) {
+    for (const range of affected.ranges ?? []) {
+      for (const event of range.events ?? []) {
+        if (event.fixed) return event.fixed;
       }
     }
   }
   return null;
 }
 
+type OsvVulnerability = {
+  id?: string;
+  summary?: string;
+  severity?: Array<{ type?: string; score?: string }>;
+  affected?: Array<{ ranges?: Array<{ events?: Array<{ fixed?: string }> }> }>;
+};
+
 type OsvJsonOutput = {
   results?: Array<{
     packages?: Array<{
       package?: { name?: string; version?: string; ecosystem?: string };
-      vulnerabilities?: Array<{
-        affected?: Array<{ ranges?: Array<{ events?: Array<{ fixed?: string }> }> }>;
-      }>;
+      vulnerabilities?: OsvVulnerability[];
     }>;
   }>;
 };
-
-function classifyPackageIntoEcosystem(
-  pkgName: string,
-  pkgVersion: string,
-  ecosystem: string,
-  safeVersion: string | null,
-  protectedComposer: Set<string>,
-  protectedNpm: Set<string>,
-  php: EcosystemScanResult,
-  npm: EcosystemScanResult,
-): void {
-  const isPhp = ecosystem === 'packagist' || ecosystem === 'composer';
-  const isNpm = ecosystem === 'npm';
-  const target = isPhp ? php : isNpm ? npm : null;
-  if (!target) return;
-
-  const isProtected = (isPhp ? protectedComposer : protectedNpm).has(pkgName);
-  const packageRef = `${pkgName}@${pkgVersion}`;
-
-  target.vulnerabilities_total++;
-
-  if (!safeVersion || isProtected) {
-    target.breaking++;
-    target.breaking_packages.push(packageRef);
-  } else {
-    target.auto_safe++;
-    target.auto_safe_packages.push(packageRef);
-  }
-}
 
 function parseOsvJsonOutput(
   stdout: string,
@@ -84,20 +121,65 @@ function parseOsvJsonOutput(
 
   if (!data.results) return { php, npm };
 
-  const protectedComposer = new Set(config.protected_packages.composer.map((p) => p.package));
-  const protectedNpm = new Set(config.protected_packages.npm.map((p) => p.package));
-
   for (const result of data.results) {
     for (const pkg of result.packages ?? []) {
       const pkgName = pkg.package?.name ?? '';
       const pkgVersion = pkg.package?.version ?? '';
       const ecosystem = pkg.package?.ecosystem?.toLowerCase() ?? '';
-      const safeVersion = extractSafeVersion(pkg.vulnerabilities ?? []);
+      const isPhp = ecosystem === 'packagist' || ecosystem === 'composer';
+      const isNpm = ecosystem === 'npm';
+      const target = isPhp ? php : isNpm ? npm : null;
+      if (!target) continue;
 
-      classifyPackageIntoEcosystem(
-        pkgName, pkgVersion, ecosystem, safeVersion,
-        protectedComposer, protectedNpm, php, npm,
-      );
+      const protectedList = isPhp
+        ? config.protected_packages.composer
+        : config.protected_packages.npm;
+
+      for (const vuln of pkg.vulnerabilities ?? []) {
+        const ghsaId = vuln.id ?? '';
+        const risk = vuln.summary ?? '';
+        const cvss = extractCvss(vuln);
+        const safeVersion = extractSafeVersionFromVuln(vuln);
+
+        const classified = classifyPackage(
+          { name: pkgName, currentVersion: pkgVersion, safeVersion },
+          protectedList,
+        );
+
+        const entry: VulnerabilityEntry = {
+          ecosystem: isPhp ? 'composer' : 'npm',
+          package: pkgName,
+          currentVersion: pkgVersion,
+          safeVersion,
+          cvss,
+          ghsaId,
+          risk,
+          classification: classified.classification,
+          reason: classified.reason ?? '',
+        };
+
+        target.vulnerabilities.push(entry);
+        target.vulnerabilities_total++;
+
+        const packageRef = `${pkgName}@${pkgVersion}`;
+
+        if (classified.classification === 'auto_safe') {
+          target.auto_safe++;
+          if (!target.auto_safe_packages.includes(packageRef)) {
+            target.auto_safe_packages.push(packageRef);
+          }
+        } else if (classified.classification === 'breaking') {
+          target.breaking++;
+          if (!target.breaking_packages.includes(packageRef)) {
+            target.breaking_packages.push(packageRef);
+          }
+        } else {
+          target.manual++;
+          if (!target.manual_packages.includes(packageRef)) {
+            target.manual_packages.push(packageRef);
+          }
+        }
+      }
     }
   }
 

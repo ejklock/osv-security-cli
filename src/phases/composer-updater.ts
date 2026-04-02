@@ -82,7 +82,9 @@ export async function runComposerUpdater(
 
   if (runner.dryRun) {
     logger.info(`[DRY-RUN] Would execute: composer update ${autoSafePackageNames.join(' ')} --no-interaction`);
-    logger.info(`[DRY-RUN] Would execute: ${config.runtime.test_command}`);
+    if (config.runtime.test_command) {
+      logger.info(`[DRY-RUN] Would execute: ${config.runtime.test_command}`);
+    }
     logger.info(`[DRY-RUN] Would execute: ${OSV.scanPhp}`);
     return {
       ...base,
@@ -106,28 +108,33 @@ export async function runComposerUpdater(
       };
     }
 
-    const testResult = await runTestSuite(runner, config.runtime.test_command, cwd);
-    if (testResult.exitCode !== 0) {
-      logger.error('Tests failed — reverting Composer updates...');
-      await revertComposerChanges(runner, backups, cwd);
-      return {
-        ...base,
-        status: 'error',
-        tests: 'fail',
-        tests_detail: testResult.stdout || testResult.stderr,
-        error: 'Tests failed after composer update — changes reverted',
-      };
+    let tests: UpdateResultJson['tests'] = 'skipped';
+    let testsDetail = 'No test_command configured — skipped';
+
+    if (config.runtime.test_command) {
+      const testResult = await runTestSuite(runner, config.runtime.test_command, cwd);
+      if (testResult.exitCode !== 0) {
+        logger.error('Tests failed — reverting Composer updates...');
+        await revertComposerChanges(runner, backups, cwd);
+        return {
+          ...base,
+          status: 'error',
+          tests: 'fail',
+          tests_detail: testResult.stdout || testResult.stderr,
+          error: 'Tests failed after composer update — changes reverted',
+        };
+      }
+      tests = 'pass';
+      testsDetail = testResult.stdout.trim().split('\n').slice(-2).join(' ') || 'Tests passed';
     }
 
     await verifyResidualVulnerabilities(runner, cwd);
 
-    const testDetail = testResult.stdout.trim().split('\n').slice(-2).join(' ');
-
     return {
       ...base,
       packages_updated: scanResult.php.auto_safe_packages,
-      tests: 'pass',
-      tests_detail: testDetail || 'Tests passed',
+      tests,
+      tests_detail: testsDetail,
     };
   } catch (err) {
     throw new PhaseError(

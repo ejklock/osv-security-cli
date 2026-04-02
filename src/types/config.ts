@@ -15,8 +15,8 @@ export interface RuntimeConfig {
   execution: ExecutionEnv;
   docker_service: string;
   docker_workdir?: string;
-  test_command: string;
-  build_commands: {
+  test_command?: string;
+  build_commands?: {
     frontend: string;
     backend: string;
   };
