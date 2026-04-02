@@ -19,6 +19,10 @@ import {
   PhaseError,
 } from "../src/utils/errors.js";
 import { prompt } from "../src/utils/prompt.js";
+import { LocalStorageProvider } from "../src/storage/local.js";
+import { createStorageProvider } from "../src/storage/factory.js";
+import { runCloudSetup } from "../src/commands/cloud-setup.js";
+import type { StorageProvider } from "../src/storage/provider.js";
 import type { ConsolidatedReport } from "../src/types/report.js";
 
 const program = new Command();
@@ -154,6 +158,52 @@ commonOptions(
   await runCommand("executive-report", opts);
 });
 
+// cloud-setup command
+program
+  .command("cloud-setup")
+  .description("Interactive Google Drive folder picker — saves folder_id to project-config.yml")
+  .option("-c, --config <path>", "Path to project-config.yml", DEFAULT_CONFIG_PATH)
+  .option("--cwd <path>", "Working directory", process.cwd())
+  .action(async (opts: { config: string; cwd: string }) => {
+    await runCloudSetup({ configPath: opts.config, cwd: opts.cwd });
+  });
+
+async function saveReport(
+  filename: string,
+  content: string,
+  reportsDir: string,
+  cloudStorageConfig: import("../src/types/config.js").CloudStorageConfig | undefined,
+  cwd: string,
+): Promise<void> {
+  const providers: StorageProvider[] = [new LocalStorageProvider(reportsDir)];
+  if (cloudStorageConfig) {
+    try {
+      providers.push(await createStorageProvider(cloudStorageConfig, cwd));
+    } catch (err) {
+      process.stderr.write(
+        `Cloud storage init failed: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    }
+  }
+
+  let localSaved = false;
+  for (const provider of providers) {
+    try {
+      const result = await provider.upload(filename, content);
+      process.stdout.write(`Report saved [${result.provider}]: ${result.url}\n`);
+      if (result.provider === 'local') localSaved = true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!localSaved) {
+        // Local save failure is fatal
+        throw new Error(`Failed to save report locally: ${msg}`);
+      }
+      // Cloud failure is non-fatal
+      process.stderr.write(`Cloud upload failed: ${msg}\n`);
+    }
+  }
+}
+
 async function runCommand(
   command: string,
   opts: {
@@ -237,10 +287,8 @@ async function runCommand(
           composerUpdate: result.composerUpdate,
         });
         const filename = executiveReportFilename(config.project.client, config.project.name);
-        const reportDir = resolve(opts.cwd, ".osv-scanner/reports");
-        const reportPath = resolve(reportDir, filename);
-        await writeOutput(execReport, reportPath);
-        process.stdout.write(`Executive report saved to: ${reportPath}\n`);
+        const reportsDir = resolve(opts.cwd, config.reports_dir ?? ".osv-scanner/reports");
+        await saveReport(filename, execReport, reportsDir, config.cloud_storage, opts.cwd);
       }
 
       if (result.overallStatus === "error") exitCode = 1;
@@ -269,11 +317,8 @@ async function runCommand(
       });
 
       const filename = executiveReportFilename(client, project);
-      const reportDir = resolve(opts.cwd, ".osv-scanner/reports");
-      const reportPath = opts.output ?? resolve(reportDir, filename);
-
-      await writeOutput(report, reportPath);
-      process.stdout.write(`Report saved to: ${reportPath}\n`);
+      const reportsDir = resolve(opts.cwd, config.reports_dir ?? ".osv-scanner/reports");
+      await saveReport(filename, report, reportsDir, config.cloud_storage, opts.cwd);
     }
   } catch (err) {
     if (err instanceof ConfigLoadError) {

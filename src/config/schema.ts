@@ -22,6 +22,13 @@ const RuntimeConfigSchema = z.object({
   }).optional(),
 });
 
+const CloudStorageConfigSchema = z.object({
+  provider: z.enum(['google_drive']),
+  folder_id: z.string(),
+  credentials: z.string().optional(),
+  credentials_env: z.string().optional(),
+});
+
 const SafeUpdatePolicySchema = z.object({
   allow_patch_and_minor_within_constraints: z.boolean(),
   require_authorization_for_constraint_change: z.boolean(),
@@ -40,6 +47,8 @@ export const ProjectConfigSchema = z.object({
   }),
   safe_update_policy: SafeUpdatePolicySchema,
   conflict_resolution: z.string(),
+  reports_dir: z.string().optional(),
+  cloud_storage: CloudStorageConfigSchema.optional(),
 });
 
 export type ProjectConfigInput = z.input<typeof ProjectConfigSchema>;

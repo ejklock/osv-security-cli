@@ -72,5 +72,13 @@ safe_update_policy:
   authorization_format: 'sim, confirmo breaking changes para [vendor/pacote]'
 
 conflict_resolution: 'stop_and_ask'
+
+# reports_dir: '.osv-scanner/reports'   # optional — local output directory for reports (default shown)
+
+# cloud_storage:                         # optional — upload reports to cloud storage after generation
+#   provider: google_drive
+#   folder_id: 'YOUR_GOOGLE_DRIVE_FOLDER_ID'
+#   credentials: '.osv-scanner/gdrive-service-account.json'
+#   # credentials_env: GDRIVE_SERVICE_ACCOUNT_JSON  # alternative: env var with JSON (for CI/CD)
 `;
 }

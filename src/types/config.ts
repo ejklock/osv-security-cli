@@ -22,6 +22,13 @@ export interface RuntimeConfig {
   };
 }
 
+export interface CloudStorageConfig {
+  provider: 'google_drive';
+  folder_id: string;
+  credentials?: string;
+  credentials_env?: string;
+}
+
 export interface SafeUpdatePolicy {
   allow_patch_and_minor_within_constraints: boolean;
   require_authorization_for_constraint_change: boolean;
@@ -40,4 +47,6 @@ export interface ProjectConfig {
   };
   safe_update_policy: SafeUpdatePolicy;
   conflict_resolution: string;
+  reports_dir?: string;
+  cloud_storage?: CloudStorageConfig;
 }
