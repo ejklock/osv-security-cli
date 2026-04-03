@@ -1,9 +1,9 @@
 import type { ExecutiveReportOptions } from '../types/report.js';
 import type { VulnerabilityEntry } from '../types/scan.js';
+import { render } from './renderer.js';
+import executiveTemplate from './templates/executive.hbs';
 
-function monthName(date: Date): string {
-  return date.toLocaleString('en-US', { month: 'long' });
-}
+// ── helpers ─────────────────────────────────────────────────────────────────
 
 function monthNamePt(date: Date): string {
   const months = [
@@ -13,44 +13,43 @@ function monthNamePt(date: Date): string {
   return months[date.getMonth()]!;
 }
 
-function zeroPad(n: number): string {
-  return String(n).padStart(2, '0');
+function monthName(date: Date): string {
+  return date.toLocaleString('en-US', { month: 'long' });
 }
 
-function ghsaLink(ghsaId: string): string {
-  if (!ghsaId) return '—';
-  return `[${ghsaId}](https://osv.dev/${ghsaId})`;
+function ghsaLink(id: string): string {
+  return id ? `[${id}](https://osv.dev/${id})` : '—';
 }
 
 function ecoLabel(ecosystem: 'composer' | 'npm'): string {
   return ecosystem === 'composer' ? 'Composer' : 'npm';
 }
 
-function derivePendingStatusPt(vuln: VulnerabilityEntry): string {
-  const r = vuln.reason;
-  if (!r || r.includes('No safe version') || r.includes('Cannot parse')) {
-    return 'pendente (sem correção disponível)';
-  }
-  if (r.includes('Major version bump')) {
-    return 'pendente (requer autorização)';
-  }
-  if (r.includes('Protected package')) {
-    return 'pendente';
-  }
-  return 'pendente';
+function parsePackageName(ref: string): string {
+  const at = ref.lastIndexOf('@');
+  return at > 0 ? ref.slice(0, at) : ref;
 }
 
-function deriveMotivoePt(vuln: VulnerabilityEntry): string {
+function uniqueCount(vulns: VulnerabilityEntry[]): number {
+  return new Set(vulns.map((v) => v.package)).size;
+}
+
+function pkgCountLabel(count: number, vulnCount: number, ecosystem: string): string {
+  return count === 1
+    ? `${vulnCount} em ${ecosystem} (${count} pacote)`
+    : `${vulnCount} em ${ecosystem} (${count} pacotes)`;
+}
+
+function motivoPt(vuln: VulnerabilityEntry): string {
   const r = vuln.reason;
   if (!r || r.includes('No safe version') || r.includes('Cannot parse')) {
     return 'Sem correção disponível upstream';
   }
   if (r.includes('Major version bump')) {
     const match = r.match(/(\S+)\s*→\s*(\S+)/);
-    if (match) {
-      return `Requer versão major ${match[2]} — mudança disruptiva; requer autorização`;
-    }
-    return 'Requer versão major — mudança disruptiva; requer autorização';
+    return match
+      ? `Requer versão major ${match[2]} — mudança disruptiva; requer autorização`
+      : 'Requer versão major — mudança disruptiva; requer autorização';
   }
   if (r.includes('Protected package')) {
     const constraintMatch = r.match(/constraint\s+(\S+)/);
@@ -60,256 +59,171 @@ function deriveMotivoePt(vuln: VulnerabilityEntry): string {
   return r;
 }
 
-function parsePackageName(ref: string): string {
-  const atIndex = ref.lastIndexOf('@');
-  return atIndex > 0 ? ref.slice(0, atIndex) : ref;
+function pendingStatusPt(vuln: VulnerabilityEntry): string {
+  const r = vuln.reason;
+  if (!r || r.includes('No safe version') || r.includes('Cannot parse')) return 'pendente (sem correção disponível)';
+  if (r.includes('Major version bump')) return 'pendente (requer autorização)';
+  return 'pendente';
 }
 
-function uniquePackageCount(vulns: VulnerabilityEntry[]): number {
-  return new Set(vulns.map((v) => v.package)).size;
-}
+// ── context builder ──────────────────────────────────────────────────────────
 
 export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
   const now = new Date();
-  const year = now.getFullYear();
-  const monthFull = monthNamePt(now);
+
+  const composerUpdated = opts.composerUpdate?.packages_updated ?? [];
+  const npmUpdated = opts.npmUpdate?.packages_updated ?? [];
+  const composerUpdatedNames = new Set(composerUpdated.map(parsePackageName));
+  const npmUpdatedNames = new Set(npmUpdated.map(parsePackageName));
 
   const allVulnsBefore = [
     ...opts.scanBefore.php.vulnerabilities,
     ...opts.scanBefore.npm.vulnerabilities,
   ];
 
-  const composerUpdated = opts.composerUpdate?.packages_updated ?? [];
-  const npmUpdated = opts.npmUpdate?.packages_updated ?? [];
+  const fixedVulns = allVulnsBefore
+    .filter((v) => {
+      const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
+      return v.classification === 'auto_safe' && names.has(v.package);
+    })
+    .map((v) => ({
+      ecoLabel: ecoLabel(v.ecosystem),
+      ghsaLink: ghsaLink(v.ghsaId),
+      cvss: v.cvss,
+      package: v.package,
+      currentVersion: v.currentVersion,
+      safeVersion: v.safeVersion ?? '—',
+      risk: v.risk,
+    }));
 
-  // O(1) lookup sets — avoids O(n×u) with .some() inside filter loops
-  const composerUpdatedNames = new Set(composerUpdated.map(parsePackageName));
-  const npmUpdatedNames = new Set(npmUpdated.map(parsePackageName));
+  const pendingVulns = allVulnsBefore
+    .filter((v) => {
+      if (v.classification !== 'auto_safe') return true;
+      const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
+      return !names.has(v.package);
+    })
+    .map((v) => ({
+      ecoLabel: ecoLabel(v.ecosystem),
+      ghsaLink: ghsaLink(v.ghsaId),
+      cvss: v.cvss,
+      package: v.package,
+      currentVersion: v.currentVersion,
+      motivoPt: motivoPt(v),
+    }));
 
-  const fixedVulns = allVulnsBefore.filter((v) => {
-    const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
-    return v.classification === 'auto_safe' && names.has(v.package);
+  const totalBefore = opts.scanBefore.php.vulnerabilities_total + opts.scanBefore.npm.vulnerabilities_total;
+  const phpPkgsBefore = uniqueCount(opts.scanBefore.php.vulnerabilities);
+  const npmPkgsBefore = uniqueCount(opts.scanBefore.npm.vulnerabilities);
+
+  const phpVulnsAfter = opts.scanBefore.php.vulnerabilities.map((v) => {
+    const fixed = composerUpdatedNames.has(v.package) && v.classification === 'auto_safe';
+    return {
+      ghsaId: v.ghsaId,
+      cvss: v.cvss,
+      package: v.package,
+      statusPt: fixed ? `corrigido (${v.safeVersion ?? '—'})` : pendingStatusPt(v),
+      risk: v.risk,
+    };
   });
 
-  const pendingVulns = allVulnsBefore.filter((v) => {
+  const npmVulnsAfter = opts.scanBefore.npm.vulnerabilities.map((v) => {
+    const fixed = npmUpdatedNames.has(v.package) && v.classification === 'auto_safe';
+    return {
+      ghsaId: v.ghsaId,
+      cvss: v.cvss,
+      package: v.package,
+      statusPt: fixed ? `corrigido (${v.safeVersion ?? '—'})` : pendingStatusPt(v),
+      risk: v.risk,
+    };
+  });
+
+  const phpPendingVulns = pendingVulns.filter((_, i) => allVulnsBefore.filter((v) => {
+    const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
+    return v.classification !== 'auto_safe' || !names.has(v.package);
+  })[i]?.ecosystem === 'composer');
+
+  // simpler: re-filter original for ecosystem counts
+  const pendingOriginal = allVulnsBefore.filter((v) => {
     if (v.classification !== 'auto_safe') return true;
     const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
     return !names.has(v.package);
   });
+  const phpPendingOrig = pendingOriginal.filter((v) => v.ecosystem === 'composer');
+  const npmPendingOrig = pendingOriginal.filter((v) => v.ecosystem === 'npm');
+  const phpPkgsAfter = uniqueCount(phpPendingOrig);
+  const npmPkgsAfter = uniqueCount(npmPendingOrig);
 
-  const totalBefore =
-    opts.scanBefore.php.vulnerabilities_total + opts.scanBefore.npm.vulnerabilities_total;
-  const phpPkgsBefore = uniquePackageCount(opts.scanBefore.php.vulnerabilities);
-  const npmPkgsBefore = uniquePackageCount(opts.scanBefore.npm.vulnerabilities);
-
-  const totalAfter = pendingVulns.length;
-  const phpPendingVulns = pendingVulns.filter((v) => v.ecosystem === 'composer');
-  const npmPendingVulns = pendingVulns.filter((v) => v.ecosystem === 'npm');
-  const phpPkgsAfter = uniquePackageCount(phpPendingVulns);
-  const npmPkgsAfter = uniquePackageCount(npmPendingVulns);
-
-  const lines: string[] = [];
-
-  // Header
-  lines.push(`Cliente: ${opts.client}`);
-  lines.push(`Projeto: ${opts.project}`);
-  lines.push(`Período: ${monthFull} ${year}`);
-  lines.push('');
-
-  // Tarefa
-  lines.push('Tarefa');
-  lines.push('');
-  lines.push('Manutenção de Segurança — OSV Scanner (rotina mensal)');
-  lines.push('');
-  lines.push(
-    'Verificação mensal das dependências instaladas (PHP/Composer e npm) para identificar pacotes com vulnerabilidades conhecidas e aplicar correções disponíveis.',
-  );
-  lines.push('');
-
-  // Resolução
-  lines.push('Resolução');
-  lines.push('');
-
-  if (totalBefore === 0) {
-    lines.push(
-      'Nenhuma vulnerabilidade foi identificada nas dependências PHP ou npm. O projeto está atualizado e seguro.',
-    );
-  } else if (fixedVulns.length > 0) {
-    lines.push(
-      'Após a execução da varredura, os seguintes problemas foram encontrados e corrigidos:',
-    );
-    lines.push('');
-    lines.push('| Tipo | CVE/GHSA | CVSS | Pacote | Versão Antiga | Versão Corrigida | Risco |');
-    lines.push('|------|----------|------|---------|---------------|------------------|-------|');
-    for (const v of fixedVulns) {
-      lines.push(
-        `| ${ecoLabel(v.ecosystem)} | ${ghsaLink(v.ghsaId)} | ${v.cvss} | ${v.package} | ${v.currentVersion} | ${v.safeVersion ?? '—'} | ${v.risk} |`,
-      );
-    }
+  // pendingByPkg for Resumo section
+  const pendingByPkgMap = new Map<string, VulnerabilityEntry[]>();
+  for (const v of pendingOriginal) {
+    const key = `${v.ecosystem}:${v.package}`;
+    const arr = pendingByPkgMap.get(key) ?? [];
+    arr.push(v);
+    pendingByPkgMap.set(key, arr);
   }
+  const pendingByPkg = [...pendingByPkgMap.values()].map((vulns) => {
+    const v = vulns[0]!;
+    const maxCvss = vulns.reduce((max, x) => {
+      const n = parseFloat(x.cvss);
+      const m = parseFloat(max);
+      return !isNaN(n) && n > (isNaN(m) ? 0 : m) ? x.cvss : max;
+    }, '0');
+    return {
+      package: v.package,
+      currentVersion: v.currentVersion,
+      motivoPt: motivoPt(v),
+      risk: v.risk,
+      cvssDisplay: maxCvss !== '0' ? ` CVSS ${maxCvss}` : '',
+    };
+  });
 
-  if (pendingVulns.length > 0) {
-    lines.push('');
-    lines.push(
-      'As seguintes vulnerabilidades não puderam ser corrigidas automaticamente e permanecem pendentes:',
-    );
-    lines.push('');
-    lines.push('| Tipo | CVE/GHSA | CVSS | Pacote | Versão Atual | Motivo |');
-    lines.push('|------|----------|------|---------|--------------|--------|');
-    for (const v of pendingVulns) {
-      lines.push(
-        `| ${ecoLabel(v.ecosystem)} | ${ghsaLink(v.ghsaId)} | ${v.cvss} | ${v.package} | ${v.currentVersion} | ${deriveMotivoePt(v)} |`,
-      );
-    }
-  }
-
-  lines.push('');
-  lines.push('---');
-  lines.push('');
-
-  // Evidencias — Antes
-  lines.push('Evidencias — Antes');
-  lines.push('');
-  lines.push('| Tipo | CVE/GHSA | CVSS | Pacote | Versão | Risco |');
-  lines.push('|------|----------|------|---------|--------|-------|');
-  for (const v of allVulnsBefore) {
-    lines.push(
-      `| ${ecoLabel(v.ecosystem)} | ${v.ghsaId} | ${v.cvss} | ${v.package} | ${v.currentVersion} | ${v.risk} |`,
-    );
-  }
-  lines.push('');
-
-  const phpLabel = phpPkgsBefore === 1
-    ? `${opts.scanBefore.php.vulnerabilities_total} em PHP/Composer (${phpPkgsBefore} pacote)`
-    : `${opts.scanBefore.php.vulnerabilities_total} em PHP/Composer (${phpPkgsBefore} pacotes)`;
-  const npmLabel = npmPkgsBefore === 1
-    ? `${opts.scanBefore.npm.vulnerabilities_total} em npm (${npmPkgsBefore} pacote)`
-    : `${opts.scanBefore.npm.vulnerabilities_total} em npm (${npmPkgsBefore} pacotes)`;
-
-  lines.push(
-    `Varredura inicial (antes das correções): **${totalBefore} vulnerabilidades** — ${phpLabel}, ${npmLabel}`,
-  );
-  lines.push('');
-  lines.push('---');
-  lines.push('');
-
-  // Evidencias — Depois
-  lines.push('Evidencias — Depois');
-  lines.push('');
-
-  if (opts.scanBefore.php.vulnerabilities.length > 0) {
-    lines.push('Composer (composer.lock) — resumo da varredura final:');
-    lines.push('');
-    lines.push('| Tipo | CVE/GHSA | CVSS | Pacote | Status após correções | Risco |');
-    lines.push('|------|----------|------|---------|----------------------|-------|');
-    for (const v of opts.scanBefore.php.vulnerabilities) {
-      const fixed = composerUpdatedNames.has(v.package) && v.classification === 'auto_safe';
-      const status = fixed
-        ? `corrigido (${v.safeVersion ?? '—'})`
-        : derivePendingStatusPt(v);
-      lines.push(
-        `| Composer | ${v.ghsaId} | ${v.cvss} | ${v.package} | ${status} | ${v.risk} |`,
-      );
-    }
-    lines.push('');
-  }
-
-  if (opts.scanBefore.npm.vulnerabilities.length > 0) {
-    lines.push('npm (package-lock.json) — resumo da varredura final:');
-    lines.push('');
-    lines.push('| Tipo | CVE/GHSA | CVSS | Pacote | Status após correções | Risco |');
-    lines.push('|------|----------|------|---------|----------------------|-------|');
-    for (const v of opts.scanBefore.npm.vulnerabilities) {
-      const fixed = npmUpdatedNames.has(v.package) && v.classification === 'auto_safe';
-      const status = fixed
-        ? `corrigido (${v.safeVersion ?? '—'})`
-        : derivePendingStatusPt(v);
-      lines.push(
-        `| npm | ${v.ghsaId} | ${v.cvss} | ${v.package} | ${status} | ${v.risk} |`,
-      );
-    }
-    lines.push('');
-  }
-
-  const phpAfterLabel = phpPkgsAfter === 1
-    ? `${phpPendingVulns.length} em PHP/Composer (${phpPkgsAfter} pacote: ${[...new Set(phpPendingVulns.map((v) => v.package))].join(', ')})`
-    : `${phpPendingVulns.length} em PHP/Composer (${phpPkgsAfter} pacotes)`;
-  const npmAfterLabel = npmPkgsAfter === 1
-    ? `${npmPendingVulns.length} em npm (${npmPkgsAfter} pacote)`
-    : `${npmPendingVulns.length} em npm (${npmPkgsAfter} pacotes)`;
-
-  lines.push(
-    `Varredura pós-correção: **${totalAfter} vulnerabilidades restantes** — ${phpAfterLabel}, ${npmAfterLabel}`,
-  );
-  lines.push('');
-
-  // Tests / Build verification
   const composerTests = opts.composerUpdate?.tests;
-  const composerTestsDetail = opts.composerUpdate?.tests_detail;
-  if (composerTests === 'pass' && composerTestsDetail) {
-    lines.push('Verificação de testes após aplicação das correções:');
-    lines.push('');
-    lines.push('```');
-    lines.push(composerTestsDetail);
-    lines.push('```');
-    lines.push('');
-  }
-
   const npmBuildStatus = opts.npmUpdate?.build_status;
-  const npmBuildDetail = opts.npmUpdate?.build_detail;
-  if (npmBuildStatus === 'pass' && npmBuildDetail) {
-    lines.push(`Build de frontend verificado com sucesso: ${npmBuildDetail}`);
-    lines.push('');
-  }
 
-  lines.push('---');
-  lines.push('');
+  const phpAfterPkgList = phpPkgsAfter === 1
+    ? `${phpPendingOrig.length} em PHP/Composer (${phpPkgsAfter} pacote: ${[...new Set(phpPendingOrig.map((v) => v.package))].join(', ')})`
+    : `${phpPendingOrig.length} em PHP/Composer (${phpPkgsAfter} pacotes)`;
 
-  // Resumo
-  lines.push('Resumo');
-  lines.push('');
+  const context: Record<string, unknown> = {
+    client: opts.client,
+    project: opts.project,
+    monthFull: monthNamePt(now),
+    year: now.getFullYear(),
+    noVulns: totalBefore === 0,
+    fixedVulns,
+    pendingVulns,
+    allVulnsBefore: allVulnsBefore.map((v) => ({
+      ecoLabel: ecoLabel(v.ecosystem),
+      ghsaId: v.ghsaId,
+      cvss: v.cvss,
+      package: v.package,
+      currentVersion: v.currentVersion,
+      risk: v.risk,
+    })),
+    totalBefore,
+    phpLabel: pkgCountLabel(phpPkgsBefore, opts.scanBefore.php.vulnerabilities_total, 'PHP/Composer'),
+    npmLabel: pkgCountLabel(npmPkgsBefore, opts.scanBefore.npm.vulnerabilities_total, 'npm'),
+    hasPhpVulns: phpVulnsAfter.length > 0,
+    phpVulnsAfter,
+    hasNpmVulns: npmVulnsAfter.length > 0,
+    npmVulnsAfter,
+    totalAfter: pendingOriginal.length,
+    phpAfterLabel: phpAfterPkgList,
+    npmAfterLabel: npmPkgsAfter === 1
+      ? `${npmPendingOrig.length} em npm (${npmPkgsAfter} pacote)`
+      : `${npmPendingOrig.length} em npm (${npmPkgsAfter} pacotes)`,
+    showComposerTests: composerTests === 'pass' && !!opts.composerUpdate?.tests_detail,
+    composerTestsDetail: opts.composerUpdate?.tests_detail ?? '',
+    showNpmBuild: npmBuildStatus === 'pass' && !!opts.npmUpdate?.build_detail,
+    npmBuildDetail: opts.npmUpdate?.build_detail ?? '',
+    allFixed: fixedVulns.length > 0 && pendingOriginal.length === 0,
+    pendingByPkg,
+  };
 
-  if (totalBefore === 0) {
-    lines.push(
-      'Nenhuma vulnerabilidade foi identificada nas dependências PHP ou npm. O projeto está atualizado e seguro.',
-    );
-  } else if (fixedVulns.length > 0 && pendingVulns.length === 0) {
-    lines.push(
-      'Todas as vulnerabilidades identificadas foram corrigidas. O projeto está atualizado e seguro em relação às suas dependências.',
-    );
-  } else if (pendingVulns.length > 0) {
-    lines.push(
-      'Todas as vulnerabilidades que puderam ser corrigidas sem mudanças disruptivas foram aplicadas. Os itens listados abaixo requerem avaliação ou autorização de versão principal:',
-    );
-    lines.push('');
+  // suppress unused variable — phpPendingVulns was an intermediate
+  void phpPendingVulns;
 
-    // Group pending by package for summary bullets
-    const pendingByPkg = new Map<string, VulnerabilityEntry[]>();
-    for (const v of pendingVulns) {
-      const key = `${v.ecosystem}:${v.package}`;
-      const existing = pendingByPkg.get(key) ?? [];
-      existing.push(v);
-      pendingByPkg.set(key, existing);
-    }
-
-    for (const [, vulns] of pendingByPkg) {
-      const v = vulns[0]!;
-      const maxCvss = vulns.reduce((max, x) => {
-        const n = parseFloat(x.cvss);
-        const m = parseFloat(max);
-        return !isNaN(n) && n > (isNaN(m) ? 0 : m) ? x.cvss : max;
-      }, '0');
-
-      const cvssDisplay = maxCvss === '0' ? '' : ` CVSS ${maxCvss}`;
-      lines.push(`- ${v.package} (${v.currentVersion}): ${deriveMotivoePt(v)}. Risco: ${v.risk}${cvssDisplay}.`);
-    }
-  } else {
-    lines.push(
-      'Vulnerabilidades identificadas requerem ação manual — nenhuma correção automática foi aplicada.',
-    );
-  }
-
-  return lines.join('\n');
+  return render(executiveTemplate as unknown as string, context);
 }
 
 export function executiveReportFilename(client: string, project: string): string {
