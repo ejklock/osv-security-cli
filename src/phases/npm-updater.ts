@@ -17,7 +17,7 @@ async function checkCurrentState(runner: CommandRunner, cwd: string): Promise<vo
 
 async function applyOsvFix(runner: CommandRunner, cwd: string): Promise<void> {
   logger.info(`Applying OSV in-place fix: ${OSV.fixNpm}`);
-  const result = await runner.run(OSV.fixNpm, { cwd });
+  const result = await runner.run(OSV.fixNpm, { cwd, stream: true });
   if (result.exitCode !== 0) {
     logger.warn(`osv-scanner fix exited with ${result.exitCode}: ${result.stderr}`);
   }
@@ -25,7 +25,7 @@ async function applyOsvFix(runner: CommandRunner, cwd: string): Promise<void> {
 
 async function runNpmUpdate(runner: CommandRunner, cwd: string): Promise<CommandResult> {
   logger.info('Running npm update...');
-  return runner.run('npm update', { cwd });
+  return runner.run('npm update', { cwd, stream: true });
 }
 
 async function validateBuilds(
@@ -34,9 +34,9 @@ async function validateBuilds(
   cwd: string,
 ): Promise<{ frontend: CommandResult; backend: CommandResult }> {
   logger.info('Validating frontend build...');
-  const frontend = await runner.run(config.runtime.build_commands!.frontend, { cwd });
+  const frontend = await runner.run(config.runtime.build_commands!.frontend, { cwd, stream: true });
   logger.info('Validating backend build...');
-  const backend = await runner.run(config.runtime.build_commands!.backend, { cwd });
+  const backend = await runner.run(config.runtime.build_commands!.backend, { cwd, stream: true });
   return { frontend, backend };
 }
 

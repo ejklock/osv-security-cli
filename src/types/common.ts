@@ -15,6 +15,7 @@ export interface CommandRunnerOptions {
   cwd?: string;
   timeout?: number;
   env?: Record<string, string>;
+  stream?: boolean;
 }
 
 export interface CommandRunner {

@@ -28,7 +28,7 @@ async function applyComposerUpdate(
 ): Promise<CommandResult> {
   const pkgList = packageNames.join(' ');
   logger.info(`Updating packages: ${pkgList}`);
-  return runner.run(`composer update ${pkgList} --with-all-dependencies --no-interaction`, { cwd });
+  return runner.run(`composer update ${pkgList} --with-all-dependencies --no-interaction`, { cwd, stream: true });
 }
 
 async function runTestSuite(
@@ -37,7 +37,7 @@ async function runTestSuite(
   cwd: string,
 ): Promise<CommandResult> {
   logger.info(`Running tests: ${testCommand}`);
-  return runner.run(testCommand, { cwd });
+  return runner.run(testCommand, { cwd, stream: true });
 }
 
 async function revertComposerChanges(

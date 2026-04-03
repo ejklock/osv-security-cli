@@ -21,12 +21,17 @@ export class LocalExecutor implements CommandRunner {
     }
 
     try {
+      const stdio = options.stream
+        ? (['pipe', 'inherit'] as const)
+        : ('pipe' as const);
       const result = await execa(command, {
         shell: true,
         cwd: options.cwd,
         timeout: options.timeout,
         env: options.env ? { ...process.env, ...options.env } : process.env,
         reject: false,
+        stdout: stdio,
+        stderr: stdio,
       });
 
       return {
