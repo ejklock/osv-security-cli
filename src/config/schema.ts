@@ -48,6 +48,7 @@ export const ProjectConfigSchema = z.object({
   safe_update_policy: SafeUpdatePolicySchema,
   conflict_resolution: z.string(),
   reports_dir: z.string().optional(),
+  report_language: z.enum(['pt-br', 'en']).optional(),
   cloud_storage: CloudStorageConfigSchema.optional(),
 });
 

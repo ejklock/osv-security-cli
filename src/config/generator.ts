@@ -73,7 +73,8 @@ safe_update_policy:
 
 conflict_resolution: 'stop_and_ask'
 
-# reports_dir: '.osv-scanner/reports'   # optional — local output directory for reports (default shown)
+# report_language: 'pt-br'             # optional — report language: 'pt-br' (default) or 'en'
+# reports_dir: '.osv-scanner/reports'  # optional — local output directory for reports (default shown)
 
 # cloud_storage:                         # optional — upload reports to cloud storage after generation
 #   provider: google_drive

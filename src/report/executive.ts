@@ -1,17 +1,11 @@
 import type { ExecutiveReportOptions } from '../types/report.js';
 import type { VulnerabilityEntry } from '../types/scan.js';
+import type { Locale } from './i18n/index.js';
+import { getLocale } from './i18n/index.js';
 import { render } from './renderer.js';
 import executiveTemplate from './templates/executive.hbs.js';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-
-function monthNamePt(date: Date): string {
-  const months = [
-    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-  ];
-  return months[date.getMonth()]!;
-}
 
 function monthName(date: Date): string {
   return date.toLocaleString('en-US', { month: 'long' });
@@ -34,41 +28,35 @@ function uniqueCount(vulns: VulnerabilityEntry[]): number {
   return new Set(vulns.map((v) => v.package)).size;
 }
 
-function pkgCountLabel(count: number, vulnCount: number, ecosystem: string): string {
-  return count === 1
-    ? `${vulnCount} em ${ecosystem} (${count} pacote)`
-    : `${vulnCount} em ${ecosystem} (${count} pacotes)`;
-}
-
-function motivoPt(vuln: VulnerabilityEntry): string {
+function motivoStr(vuln: VulnerabilityEntry, locale: Locale): string {
   const r = vuln.reason;
   if (!r || r.includes('No safe version') || r.includes('Cannot parse')) {
-    return 'Sem correção disponível upstream';
+    return locale.reason.no_safe_version;
   }
   if (r.includes('Major version bump')) {
     const match = r.match(/(\S+)\s*→\s*(\S+)/);
     return match
-      ? `Requer versão major ${match[2]} — mudança disruptiva; requer autorização`
-      : 'Requer versão major — mudança disruptiva; requer autorização';
+      ? locale.reason.major_bump(match[2]!)
+      : locale.reason.major_bump_generic;
   }
   if (r.includes('Protected package')) {
     const constraintMatch = r.match(/constraint\s+(\S+)/);
-    const constraint = constraintMatch ? constraintMatch[1] : 'restrição configurada';
-    return `Bloqueado por restrição ${constraint}`;
+    return locale.reason.protected_constraint(constraintMatch?.[1] ?? 'configured constraint');
   }
   return r;
 }
 
-function pendingStatusPt(vuln: VulnerabilityEntry): string {
+function pendingStatus(vuln: VulnerabilityEntry, locale: Locale): string {
   const r = vuln.reason;
-  if (!r || r.includes('No safe version') || r.includes('Cannot parse')) return 'pendente (sem correção disponível)';
-  if (r.includes('Major version bump')) return 'pendente (requer autorização)';
-  return 'pendente';
+  if (!r || r.includes('No safe version') || r.includes('Cannot parse')) return locale.status.no_fix;
+  if (r.includes('Major version bump')) return locale.status.needs_auth;
+  return locale.status.pending;
 }
 
 // ── context builder ──────────────────────────────────────────────────────────
 
 export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
+  const locale = getLocale(opts.locale);
   const now = new Date();
 
   const composerUpdated = opts.composerUpdate?.packages_updated ?? [];
@@ -96,20 +84,20 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
       risk: v.risk,
     }));
 
-  const pendingVulns = allVulnsBefore
-    .filter((v) => {
-      if (v.classification !== 'auto_safe') return true;
-      const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
-      return !names.has(v.package);
-    })
-    .map((v) => ({
-      ecoLabel: ecoLabel(v.ecosystem),
-      ghsaLink: ghsaLink(v.ghsaId),
-      cvss: v.cvss,
-      package: v.package,
-      currentVersion: v.currentVersion,
-      motivoPt: motivoPt(v),
-    }));
+  const pendingOriginal = allVulnsBefore.filter((v) => {
+    if (v.classification !== 'auto_safe') return true;
+    const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
+    return !names.has(v.package);
+  });
+
+  const pendingVulns = pendingOriginal.map((v) => ({
+    ecoLabel: ecoLabel(v.ecosystem),
+    ghsaLink: ghsaLink(v.ghsaId),
+    cvss: v.cvss,
+    package: v.package,
+    currentVersion: v.currentVersion,
+    motivoPt: motivoStr(v, locale),
+  }));
 
   const totalBefore = opts.scanBefore.php.vulnerabilities_total + opts.scanBefore.npm.vulnerabilities_total;
   const phpPkgsBefore = uniqueCount(opts.scanBefore.php.vulnerabilities);
@@ -121,7 +109,7 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
       ghsaId: v.ghsaId,
       cvss: v.cvss,
       package: v.package,
-      statusPt: fixed ? `corrigido (${v.safeVersion ?? '—'})` : pendingStatusPt(v),
+      statusPt: fixed ? locale.exec.fixed_version(v.safeVersion ?? '—') : pendingStatus(v, locale),
       risk: v.risk,
     };
   });
@@ -132,28 +120,26 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
       ghsaId: v.ghsaId,
       cvss: v.cvss,
       package: v.package,
-      statusPt: fixed ? `corrigido (${v.safeVersion ?? '—'})` : pendingStatusPt(v),
+      statusPt: fixed ? locale.exec.fixed_version(v.safeVersion ?? '—') : pendingStatus(v, locale),
       risk: v.risk,
     };
   });
 
-  const phpPendingVulns = pendingVulns.filter((_, i) => allVulnsBefore.filter((v) => {
-    const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
-    return v.classification !== 'auto_safe' || !names.has(v.package);
-  })[i]?.ecosystem === 'composer');
-
-  // simpler: re-filter original for ecosystem counts
-  const pendingOriginal = allVulnsBefore.filter((v) => {
-    if (v.classification !== 'auto_safe') return true;
-    const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
-    return !names.has(v.package);
-  });
   const phpPendingOrig = pendingOriginal.filter((v) => v.ecosystem === 'composer');
   const npmPendingOrig = pendingOriginal.filter((v) => v.ecosystem === 'npm');
   const phpPkgsAfter = uniqueCount(phpPendingOrig);
   const npmPkgsAfter = uniqueCount(npmPendingOrig);
 
-  // pendingByPkg for Resumo section
+  const phpBeforeLabel = locale.pkg_count(opts.scanBefore.php.vulnerabilities_total, phpPkgsBefore, 'PHP/Composer');
+  const npmBeforeLabel = locale.pkg_count(opts.scanBefore.npm.vulnerabilities_total, npmPkgsBefore, 'npm');
+
+  const phpAfterNames = phpPkgsAfter === 1
+    ? [...new Set(phpPendingOrig.map((v) => v.package))].join(', ')
+    : undefined;
+  const phpAfterLabel = locale.pkg_count(phpPendingOrig.length, phpPkgsAfter, 'PHP/Composer', phpAfterNames);
+  const npmAfterLabel = locale.pkg_count(npmPendingOrig.length, npmPkgsAfter, 'npm');
+
+  // pendingByPkg for Resumo/Summary section
   const pendingByPkgMap = new Map<string, VulnerabilityEntry[]>();
   for (const v of pendingOriginal) {
     const key = `${v.ecosystem}:${v.package}`;
@@ -171,7 +157,8 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
     return {
       package: v.package,
       currentVersion: v.currentVersion,
-      motivoPt: motivoPt(v),
+      motivoPt: motivoStr(v, locale),
+      riskLabel: 'Risk',
       risk: v.risk,
       cvssDisplay: maxCvss !== '0' ? ` CVSS ${maxCvss}` : '',
     };
@@ -180,14 +167,11 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
   const composerTests = opts.composerUpdate?.tests;
   const npmBuildStatus = opts.npmUpdate?.build_status;
 
-  const phpAfterPkgList = phpPkgsAfter === 1
-    ? `${phpPendingOrig.length} em PHP/Composer (${phpPkgsAfter} pacote: ${[...new Set(phpPendingOrig.map((v) => v.package))].join(', ')})`
-    : `${phpPendingOrig.length} em PHP/Composer (${phpPkgsAfter} pacotes)`;
-
   const context: Record<string, unknown> = {
+    t: locale.exec,
     client: opts.client,
     project: opts.project,
-    monthFull: monthNamePt(now),
+    monthFull: locale.months[now.getMonth()],
     year: now.getFullYear(),
     noVulns: totalBefore === 0,
     fixedVulns,
@@ -201,27 +185,19 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
       risk: v.risk,
     })),
     totalBefore,
-    phpLabel: pkgCountLabel(phpPkgsBefore, opts.scanBefore.php.vulnerabilities_total, 'PHP/Composer'),
-    npmLabel: pkgCountLabel(npmPkgsBefore, opts.scanBefore.npm.vulnerabilities_total, 'npm'),
+    scanBeforeSummary: locale.exec.scan_before_summary(totalBefore, phpBeforeLabel, npmBeforeLabel),
     hasPhpVulns: phpVulnsAfter.length > 0,
     phpVulnsAfter,
     hasNpmVulns: npmVulnsAfter.length > 0,
     npmVulnsAfter,
-    totalAfter: pendingOriginal.length,
-    phpAfterLabel: phpAfterPkgList,
-    npmAfterLabel: npmPkgsAfter === 1
-      ? `${npmPendingOrig.length} em npm (${npmPkgsAfter} pacote)`
-      : `${npmPendingOrig.length} em npm (${npmPkgsAfter} pacotes)`,
+    scanAfterSummary: locale.exec.scan_after_summary(pendingOriginal.length, phpAfterLabel, npmAfterLabel),
     showComposerTests: composerTests === 'pass' && !!opts.composerUpdate?.tests_detail,
     composerTestsDetail: opts.composerUpdate?.tests_detail ?? '',
     showNpmBuild: npmBuildStatus === 'pass' && !!opts.npmUpdate?.build_detail,
-    npmBuildDetail: opts.npmUpdate?.build_detail ?? '',
+    buildVerified: opts.npmUpdate?.build_detail ? locale.exec.build_verified(opts.npmUpdate.build_detail) : '',
     allFixed: fixedVulns.length > 0 && pendingOriginal.length === 0,
     pendingByPkg,
   };
-
-  // suppress unused variable — phpPendingVulns was an intermediate
-  void phpPendingVulns;
 
   return render(executiveTemplate, context);
 }
@@ -230,6 +206,5 @@ export function executiveReportFilename(client: string, project: string): string
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
-  const monthEn = monthName(now);
-  return `[${client} ${project}] Report OSV Scanner - ${year}-${month} - ${monthEn}.md`;
+  return `[${client} ${project}] Report OSV Scanner - ${year}-${month} - ${monthName(now)}.md`;
 }

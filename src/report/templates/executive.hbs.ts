@@ -1,69 +1,64 @@
 export default `\
-Cliente: {{client}}
-Projeto: {{project}}
-Período: {{monthFull}} {{year}}
+{{t.label_client}}: {{client}}
+{{t.label_project}}: {{project}}
+{{t.label_period}}: {{monthFull}} {{year}}
 
-Tarefa
+{{t.section_task}}
 
-Manutenção de Segurança — OSV Scanner (rotina mensal)
+{{t.task_title}}
 
-Verificação mensal das dependências instaladas (PHP/Composer e npm) para identificar pacotes com vulnerabilidades conhecidas e aplicar correções disponíveis.
+{{t.task_description}}
 
-Resolução
+{{t.section_resolution}}
 
 {{#if noVulns}}
-Nenhuma vulnerabilidade foi identificada nas dependências PHP ou npm. O projeto está atualizado e seguro.
+{{t.no_vulns}}
 {{else}}
 {{#if fixedVulns}}
-Após a execução da varredura, os seguintes problemas foram encontrados e corrigidos:
+{{t.found_and_fixed}}
 
-| Tipo | CVE/GHSA | CVSS | Pacote | Versão Antiga | Versão Corrigida | Risco |
-|------|----------|------|---------|---------------|------------------|-------|
+{{t.table_fixed_header}}
 {{#each fixedVulns}}| {{ecoLabel}} | {{ghsaLink}} | {{cvss}} | {{package}} | {{currentVersion}} | {{safeVersion}} | {{risk}} |
 {{/each}}{{/if}}
 {{#if pendingVulns}}
-As seguintes vulnerabilidades não puderam ser corrigidas automaticamente e permanecem pendentes:
+{{t.pending_intro}}
 
-| Tipo | CVE/GHSA | CVSS | Pacote | Versão Atual | Motivo |
-|------|----------|------|---------|--------------|--------|
+{{t.table_pending_header}}
 {{#each pendingVulns}}| {{ecoLabel}} | {{ghsaLink}} | {{cvss}} | {{package}} | {{currentVersion}} | {{motivoPt}} |
 {{/each}}{{/if}}
 {{/if}}
 
 ---
 
-Evidencias — Antes
+{{t.section_evidence_before}}
 
-| Tipo | CVE/GHSA | CVSS | Pacote | Versão | Risco |
-|------|----------|------|---------|--------|-------|
+{{t.table_before_header}}
 {{#each allVulnsBefore}}| {{ecoLabel}} | {{ghsaId}} | {{cvss}} | {{package}} | {{currentVersion}} | {{risk}} |
 {{/each}}
-Varredura inicial (antes das correções): **{{totalBefore}} vulnerabilidades** — {{phpLabel}}, {{npmLabel}}
+{{scanBeforeSummary}}
 
 ---
 
-Evidencias — Depois
+{{t.section_evidence_after}}
 
 {{#if hasPhpVulns}}
-Composer (composer.lock) — resumo da varredura final:
+{{t.composer_evidence_title}}
 
-| Tipo | CVE/GHSA | CVSS | Pacote | Status após correções | Risco |
-|------|----------|------|---------|----------------------|-------|
+{{t.table_after_header}}
 {{#each phpVulnsAfter}}| Composer | {{ghsaId}} | {{cvss}} | {{package}} | {{statusPt}} | {{risk}} |
 {{/each}}
 {{/if}}
 {{#if hasNpmVulns}}
-npm (package-lock.json) — resumo da varredura final:
+{{t.npm_evidence_title}}
 
-| Tipo | CVE/GHSA | CVSS | Pacote | Status após correções | Risco |
-|------|----------|------|---------|----------------------|-------|
+{{t.table_after_header}}
 {{#each npmVulnsAfter}}| npm | {{ghsaId}} | {{cvss}} | {{package}} | {{statusPt}} | {{risk}} |
 {{/each}}
 {{/if}}
-Varredura pós-correção: **{{totalAfter}} vulnerabilidades restantes** — {{phpAfterLabel}}, {{npmAfterLabel}}
+{{scanAfterSummary}}
 
 {{#if showComposerTests}}
-Verificação de testes após aplicação das correções:
+{{t.tests_verified_intro}}
 
 \`\`\`
 {{composerTestsDetail}}
@@ -71,24 +66,24 @@ Verificação de testes após aplicação das correções:
 
 {{/if}}
 {{#if showNpmBuild}}
-Build de frontend verificado com sucesso: {{npmBuildDetail}}
+{{buildVerified}}
 
 {{/if}}
 
 ---
 
-Resumo
+{{t.section_summary}}
 
 {{#if noVulns}}
-Nenhuma vulnerabilidade foi identificada nas dependências PHP ou npm. O projeto está atualizado e seguro.
+{{t.no_vulns}}
 {{else if allFixed}}
-Todas as vulnerabilidades identificadas foram corrigidas. O projeto está atualizado e seguro em relação às suas dependências.
+{{t.all_fixed}}
 {{else if pendingByPkg}}
-Todas as vulnerabilidades que puderam ser corrigidas sem mudanças disruptivas foram aplicadas. Os itens listados abaixo requerem avaliação ou autorização de versão principal:
+{{t.pending_needs_action_intro}}
 
-{{#each pendingByPkg}}- {{package}} ({{currentVersion}}): {{motivoPt}}. Risco: {{risk}}{{cvssDisplay}}.
+{{#each pendingByPkg}}- {{package}} ({{currentVersion}}): {{motivoPt}}. {{riskLabel}}: {{risk}}{{cvssDisplay}}.
 {{/each}}
 {{else}}
-Vulnerabilidades identificadas requerem ação manual — nenhuma correção automática foi aplicada.
+{{t.pending_manual}}
 {{/if}}
 `;

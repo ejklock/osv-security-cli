@@ -1,57 +1,57 @@
 export default `\
-# Security Report — {{projectName}}
-**Date:** {{date}}
-**Environment:** {{environment}}
+{{t.title}}
+**{{t.label_date}}:** {{date}}
+**{{t.label_environment}}:** {{environment}}
 
-## Vulnerabilities Found
-- **Total:** {{totalVulns}}
+## {{t.section_vulns}}
+- **{{t.label_total}}:** {{totalVulns}}
 - **PHP (auto-safe/breaking/manual):** {{php.auto_safe}}/{{php.breaking}}/{{php.manual}}
 - **npm (auto-safe/breaking/manual):** {{npm.auto_safe}}/{{npm.breaking}}/{{npm.manual}}
 
-## Fixes Applied
+## {{t.section_fixes}}
 
-### npm
+{{t.npm_header}}
 {{#if npmUpdated}}
 {{#each npmUpdated}}- {{this}}
 {{/each}}
 {{else}}
-- No packages updated
+- {{t.no_packages_updated}}
 {{/if}}
 
-### Composer (PHP)
+{{t.composer_header}}
 {{#if composerUpdated}}
 {{#each composerUpdated}}- {{this}}
 {{/each}}
 {{else}}
-- No packages updated
+- {{t.no_packages_updated}}
 {{/if}}
 
-## Validation After Updates
+## {{t.section_validation}}
 {{#if composerUpdate}}
-- PHP test suite: {{composerTestStatus}}
+- {{t.php_tests_label}}: {{composerTestStatus}}
 {{#if composerUpdate.tests_detail}}
   {{composerUpdate.tests_detail}}
 {{/if}}
 {{/if}}
 {{#if npmUpdate}}
-- npm build: {{npmBuildStatus}}
+- {{t.npm_build_label}}: {{npmBuildStatus}}
 {{#if npmUpdate.build_detail}}
   {{npmUpdate.build_detail}}
 {{/if}}
 {{/if}}
 
 {{#if pendingItems}}
-## Pending — Require Manual Action
+## {{t.section_pending}}
 
 {{#if breakingPkgs}}
-### Require BREAKING CHANGE (awaiting per-package authorization)
+### {{t.breaking_title}}
 {{#each breakingPkgs}}- {{this}}
-  To authorize: "sim, confirmo breaking changes para [package]"
+  {{../t.breaking_authorize}}
 {{/each}}
 
 {{/if}}
 {{#if manualPkgs}}
-### No safe version within current constraint
+### {{t.no_safe_version_title}}
 {{#each manualPkgs}}- {{this}}
 {{/each}}
 

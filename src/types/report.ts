@@ -1,6 +1,7 @@
 import type { ScanResultJson } from './scan.js';
 import type { UpdateResultJson } from './update.js';
 import type { PhaseStatus } from './common.js';
+import type { SupportedLocale } from '../report/i18n/index.js';
 
 export interface ConsolidatedReport {
   projectName: string;
@@ -10,6 +11,7 @@ export interface ConsolidatedReport {
   npmUpdate: UpdateResultJson | null;
   composerUpdate: UpdateResultJson | null;
   overallStatus: PhaseStatus;
+  locale?: SupportedLocale;
 }
 
 export interface ExecutiveReportOptions {
@@ -19,4 +21,5 @@ export interface ExecutiveReportOptions {
   scanAfter: ScanResultJson;
   npmUpdate: UpdateResultJson | null;
   composerUpdate: UpdateResultJson | null;
+  locale?: SupportedLocale;
 }

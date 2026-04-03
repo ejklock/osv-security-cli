@@ -1,0 +1,39 @@
+import type { RawLocale } from './raw-locale.js';
+import type { Locale } from './types.js';
+
+function interp(str: string, vars: Record<string, string | number>): string {
+  return str.replace(/\{\{(\w+)\}\}/g, (_, k: string) => String(vars[k] ?? ''));
+}
+
+export function buildLocale(raw: RawLocale): Locale {
+  return {
+    months: raw.months,
+
+    pkg_count(vulnCount, pkgCount, ecosystem, names) {
+      const tmpl = pkgCount === 1 ? raw.pkg_count.one : raw.pkg_count.other;
+      return interp(tmpl, { vulnCount, pkgCount, ecosystem, namesSuffix: names ? `: ${names}` : '' });
+    },
+
+    reason: {
+      no_safe_version: raw.reason.no_safe_version,
+      major_bump: (version) => interp(raw.reason.major_bump, { version }),
+      major_bump_generic: raw.reason.major_bump_generic,
+      protected_constraint: (constraint) => interp(raw.reason.protected_constraint, { constraint }),
+    },
+
+    status: raw.status,
+
+    exec: {
+      ...raw.exec,
+      scan_before_summary: (total, phpLabel, npmLabel) => interp(raw.exec.scan_before_summary, { total, phpLabel, npmLabel }),
+      scan_after_summary: (total, phpLabel, npmLabel) => interp(raw.exec.scan_after_summary, { total, phpLabel, npmLabel }),
+      build_verified: (detail) => interp(raw.exec.build_verified, { detail }),
+      fixed_version: (version) => interp(raw.exec.fixed_version, { version }),
+    },
+
+    consolidated: {
+      ...raw.consolidated,
+      title: (projectName) => interp(raw.consolidated.title, { projectName }),
+    },
+  };
+}

@@ -1,4 +1,5 @@
 import type { ExecutionEnv } from './common.js';
+import type { SupportedLocale } from '../report/i18n/index.js';
 
 export interface ProtectedPackage {
   package: string;
@@ -48,5 +49,6 @@ export interface ProjectConfig {
   safe_update_policy: SafeUpdatePolicy;
   conflict_resolution: string;
   reports_dir?: string;
+  report_language?: SupportedLocale;
   cloud_storage?: CloudStorageConfig;
 }
