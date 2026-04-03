@@ -9,7 +9,6 @@ export interface ProtectedPackage {
 
 export interface RuntimeConfig {
   php: string;
-  laravel: string;
   node: string;
   package_manager_php: string;
   package_manager_js: string;

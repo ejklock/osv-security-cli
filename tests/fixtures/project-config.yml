@@ -1,10 +1,9 @@
 project:
-  name: 'Test Laravel Project'
+  name: 'Test PHP Project'
   client: 'Test Client'
 
 runtime:
   php: '8.1'
-  laravel: '10.x'
   node: '20.x'
   package_manager_php: 'composer'
   package_manager_js: 'npm'

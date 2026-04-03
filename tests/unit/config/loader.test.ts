@@ -10,7 +10,7 @@ const fixturesDir = resolve(__dirname, '../../fixtures');
 describe('loadConfig', () => {
   it('loads a valid config file', async () => {
     const config = await loadConfig('project-config.yml', fixturesDir);
-    expect(config.project.name).toBe('Test Laravel Project');
+    expect(config.project.name).toBe('Test PHP Project');
     expect(config.project.client).toBe('Test Client');
     expect(config.runtime.execution).toBe('docker');
     expect(config.runtime.docker_service).toBe('app');

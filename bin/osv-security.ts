@@ -63,7 +63,6 @@ program
     "Working directory inside the container (e.g. /var/www/html)",
   )
   .option("--php-version <version>", "PHP version", "8.2")
-  .option("--laravel-version <version>", "Laravel version", "10.x")
   .option("--node-version <version>", "Node.js version", "20.x")
   .option("--test-command <cmd>", "Test command", "php artisan test --compact")
   .option("--cwd <path>", "Working directory", process.cwd())
@@ -94,7 +93,7 @@ program
     }
 
     const projectName =
-      opts.projectName ?? (await prompt("Project name", "My Laravel Project"));
+      opts.projectName ?? (await prompt("Project name", "My PHP Project"));
     const client = opts.client ?? (await prompt("Client name", "Client Name"));
 
     const yaml = generateConfigYaml({
@@ -104,7 +103,6 @@ program
       dockerService: opts.dockerService,
       dockerWorkdir: opts.dockerWorkdir,
       phpVersion: opts.phpVersion,
-      laravelVersion: opts.laravelVersion,
       nodeVersion: opts.nodeVersion,
       testCommand: opts.testCommand,
     });

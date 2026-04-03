@@ -8,7 +8,6 @@ const ProtectedPackageSchema = z.object({
 
 const RuntimeConfigSchema = z.object({
   php: z.string(),
-  laravel: z.string(),
   node: z.string(),
   package_manager_php: z.string(),
   package_manager_js: z.string(),
