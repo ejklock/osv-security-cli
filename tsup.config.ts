@@ -1,11 +1,11 @@
-import { defineConfig } from 'tsup';
+import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ['src/index.ts', 'bin/osv-security.ts'],
-  format: ['esm'],
-  target: 'node20',
+  entry: ["src/index.ts", "bin/osv-security.ts"],
+  format: ["esm"],
+  target: "node20",
   clean: true,
   dts: true,
-  sourcemap: true,
+  sourcemap: false,
   splitting: false,
 });
