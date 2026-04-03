@@ -1,7 +1,7 @@
 import type { ExecutiveReportOptions } from '../types/report.js';
 import type { VulnerabilityEntry } from '../types/scan.js';
 import { render } from './renderer.js';
-import executiveTemplate from './templates/executive.hbs';
+import executiveTemplate from './templates/executive.hbs.js';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -223,7 +223,7 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
   // suppress unused variable — phpPendingVulns was an intermediate
   void phpPendingVulns;
 
-  return render(executiveTemplate as unknown as string, context);
+  return render(executiveTemplate, context);
 }
 
 export function executiveReportFilename(client: string, project: string): string {

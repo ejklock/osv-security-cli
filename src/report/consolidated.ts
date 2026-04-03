@@ -1,6 +1,6 @@
 import type { ConsolidatedReport } from '../types/report.js';
 import { render } from './renderer.js';
-import consolidatedTemplate from './templates/consolidated.hbs';
+import consolidatedTemplate from './templates/consolidated.hbs.js';
 
 export function generateConsolidatedReport(data: ConsolidatedReport): string {
   const scan = data.scan;
@@ -45,5 +45,5 @@ export function generateConsolidatedReport(data: ConsolidatedReport): string {
     manualPkgs: manualPkgs.length ? manualPkgs : null,
   };
 
-  return render(consolidatedTemplate as unknown as string, context);
+  return render(consolidatedTemplate, context);
 }

@@ -8,5 +8,4 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   splitting: false,
-  loader: { '.hbs': 'text' },
 });

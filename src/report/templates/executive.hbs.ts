@@ -1,3 +1,4 @@
+export default `\
 Cliente: {{client}}
 Projeto: {{project}}
 Período: {{monthFull}} {{year}}
@@ -64,9 +65,9 @@ Varredura pós-correção: **{{totalAfter}} vulnerabilidades restantes** — {{p
 {{#if showComposerTests}}
 Verificação de testes após aplicação das correções:
 
-```
+\`\`\`
 {{composerTestsDetail}}
-```
+\`\`\`
 
 {{/if}}
 {{#if showNpmBuild}}
@@ -90,3 +91,4 @@ Todas as vulnerabilidades que puderam ser corrigidas sem mudanças disruptivas f
 {{else}}
 Vulnerabilidades identificadas requerem ação manual — nenhuma correção automática foi aplicada.
 {{/if}}
+`;

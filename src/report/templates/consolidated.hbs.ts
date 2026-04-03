@@ -1,3 +1,4 @@
+export default `\
 # Security Report — {{projectName}}
 **Date:** {{date}}
 **Environment:** {{environment}}
@@ -56,3 +57,4 @@
 
 {{/if}}
 {{/if}}
+`;
