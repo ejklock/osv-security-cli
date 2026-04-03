@@ -60,15 +60,9 @@ function deriveMotivoePt(vuln: VulnerabilityEntry): string {
   return r;
 }
 
-function isPackageUpdated(
-  vuln: VulnerabilityEntry,
-  updatedPackages: string[],
-): boolean {
-  return updatedPackages.some((ref) => {
-    const atIndex = ref.lastIndexOf('@');
-    const name = atIndex > 0 ? ref.slice(0, atIndex) : ref;
-    return name === vuln.package;
-  });
+function parsePackageName(ref: string): string {
+  const atIndex = ref.lastIndexOf('@');
+  return atIndex > 0 ? ref.slice(0, atIndex) : ref;
 }
 
 function uniquePackageCount(vulns: VulnerabilityEntry[]): number {
@@ -88,15 +82,19 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
   const composerUpdated = opts.composerUpdate?.packages_updated ?? [];
   const npmUpdated = opts.npmUpdate?.packages_updated ?? [];
 
+  // O(1) lookup sets — avoids O(n×u) with .some() inside filter loops
+  const composerUpdatedNames = new Set(composerUpdated.map(parsePackageName));
+  const npmUpdatedNames = new Set(npmUpdated.map(parsePackageName));
+
   const fixedVulns = allVulnsBefore.filter((v) => {
-    const updated = v.ecosystem === 'composer' ? composerUpdated : npmUpdated;
-    return v.classification === 'auto_safe' && isPackageUpdated(v, updated);
+    const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
+    return v.classification === 'auto_safe' && names.has(v.package);
   });
 
   const pendingVulns = allVulnsBefore.filter((v) => {
     if (v.classification !== 'auto_safe') return true;
-    const updated = v.ecosystem === 'composer' ? composerUpdated : npmUpdated;
-    return !isPackageUpdated(v, updated);
+    const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
+    return !names.has(v.package);
   });
 
   const totalBefore =
@@ -205,7 +203,7 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
     lines.push('| Tipo | CVE/GHSA | CVSS | Pacote | Status após correções | Risco |');
     lines.push('|------|----------|------|---------|----------------------|-------|');
     for (const v of opts.scanBefore.php.vulnerabilities) {
-      const fixed = isPackageUpdated(v, composerUpdated) && v.classification === 'auto_safe';
+      const fixed = composerUpdatedNames.has(v.package) && v.classification === 'auto_safe';
       const status = fixed
         ? `corrigido (${v.safeVersion ?? '—'})`
         : derivePendingStatusPt(v);
@@ -222,7 +220,7 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
     lines.push('| Tipo | CVE/GHSA | CVSS | Pacote | Status após correções | Risco |');
     lines.push('|------|----------|------|---------|----------------------|-------|');
     for (const v of opts.scanBefore.npm.vulnerabilities) {
-      const fixed = isPackageUpdated(v, npmUpdated) && v.classification === 'auto_safe';
+      const fixed = npmUpdatedNames.has(v.package) && v.classification === 'auto_safe';
       const status = fixed
         ? `corrigido (${v.safeVersion ?? '—'})`
         : derivePendingStatusPt(v);

@@ -121,6 +121,26 @@ function parseOsvJsonOutput(
 
   if (!data.results) return { php, npm };
 
+  // Pre-build Maps for O(1) protected-package lookup per vulnerability
+  const protectedComposer = new Map(
+    config.protected_packages.composer.map((p) => [p.package, p]),
+  );
+  const protectedNpm = new Map(
+    config.protected_packages.npm.map((p) => [p.package, p]),
+  );
+
+  // Sets for O(1) dedup of package-ref strings instead of O(n) .includes()
+  const phpSets = {
+    auto_safe: new Set<string>(),
+    breaking: new Set<string>(),
+    manual: new Set<string>(),
+  };
+  const npmSets = {
+    auto_safe: new Set<string>(),
+    breaking: new Set<string>(),
+    manual: new Set<string>(),
+  };
+
   for (const result of data.results) {
     for (const pkg of result.packages ?? []) {
       const pkgName = pkg.package?.name ?? '';
@@ -131,9 +151,7 @@ function parseOsvJsonOutput(
       const target = isPhp ? php : isNpm ? npm : null;
       if (!target) continue;
 
-      const protectedList = isPhp
-        ? config.protected_packages.composer
-        : config.protected_packages.npm;
+      const targetSets = isPhp ? phpSets : npmSets;
 
       for (const vuln of pkg.vulnerabilities ?? []) {
         const ghsaId = vuln.id ?? '';
@@ -143,7 +161,7 @@ function parseOsvJsonOutput(
 
         const classified = classifyPackage(
           { name: pkgName, currentVersion: pkgVersion, safeVersion },
-          protectedList,
+          isPhp ? protectedComposer : protectedNpm,
         );
 
         const entry: VulnerabilityEntry = {
@@ -165,17 +183,20 @@ function parseOsvJsonOutput(
 
         if (classified.classification === 'auto_safe') {
           target.auto_safe++;
-          if (!target.auto_safe_packages.includes(packageRef)) {
+          if (!targetSets.auto_safe.has(packageRef)) {
+            targetSets.auto_safe.add(packageRef);
             target.auto_safe_packages.push(packageRef);
           }
         } else if (classified.classification === 'breaking') {
           target.breaking++;
-          if (!target.breaking_packages.includes(packageRef)) {
+          if (!targetSets.breaking.has(packageRef)) {
+            targetSets.breaking.add(packageRef);
             target.breaking_packages.push(packageRef);
           }
         } else {
           target.manual++;
-          if (!target.manual_packages.includes(packageRef)) {
+          if (!targetSets.manual.has(packageRef)) {
+            targetSets.manual.add(packageRef);
             target.manual_packages.push(packageRef);
           }
         }

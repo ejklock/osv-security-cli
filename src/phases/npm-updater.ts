@@ -34,9 +34,9 @@ async function validateBuilds(
   cwd: string,
 ): Promise<{ frontend: CommandResult; backend: CommandResult }> {
   logger.info('Validating frontend build...');
-  const frontend = await runner.run(config.runtime.build_commands.frontend, { cwd });
+  const frontend = await runner.run(config.runtime.build_commands!.frontend, { cwd });
   logger.info('Validating backend build...');
-  const backend = await runner.run(config.runtime.build_commands.backend, { cwd });
+  const backend = await runner.run(config.runtime.build_commands!.backend, { cwd });
   return { frontend, backend };
 }
 

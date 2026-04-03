@@ -18,13 +18,13 @@ export interface ClassifiedPackage {
 
 export function classifyPackage(
   pkg: PackageVulnerability,
-  protectedPackages: ProtectedPackage[],
+  protectedPackages: Map<string, ProtectedPackage>,
 ): ClassifiedPackage {
   if (!pkg.safeVersion) {
     return { ...pkg, classification: 'manual', reason: 'No safe version available' };
   }
 
-  const protected_ = protectedPackages.find((p) => p.package === pkg.name);
+  const protected_ = protectedPackages.get(pkg.name);
 
   if (protected_) {
     // Check if the safe version satisfies the protected constraint
@@ -64,5 +64,6 @@ export function classifyPackages(
   packages: PackageVulnerability[],
   protectedPackages: ProtectedPackage[],
 ): ClassifiedPackage[] {
-  return packages.map((pkg) => classifyPackage(pkg, protectedPackages));
+  const protectedMap = new Map(protectedPackages.map((p) => [p.package, p]));
+  return packages.map((pkg) => classifyPackage(pkg, protectedMap));
 }
