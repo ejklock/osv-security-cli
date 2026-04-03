@@ -1,5 +1,6 @@
 import type { CommandRunner, PhaseStatus } from '../types/common.js';
 import type { ProjectConfig } from '../types/config.js';
+import { hasPhp, hasNpm } from '../types/config.js';
 import type { ScanResultJson } from '../types/scan.js';
 import type { UpdateResultJson } from '../types/update.js';
 import { validateGateA, validateGateB, validateGateC } from '../gates/validator.js';
@@ -15,6 +16,8 @@ export interface OrchestratorOptions {
   dryRun: boolean;
   verbose: boolean;
   phases?: ('scan' | 'npm' | 'composer' | 'report')[];
+  authorizeBreakingPhp?: boolean;
+  authorizeBreakingNpm?: boolean;
   executiveReport?: {
     client: string;
     project: string;
@@ -76,9 +79,12 @@ export async function runOrchestrator(
       `(${scanResult.npm.auto_safe} auto-safe, ${scanResult.npm.breaking} breaking)`,
   );
 
+  const hasPhpEcosystem = hasPhp(config);
+  const hasNpmEcosystem = hasNpm(config);
+
   // Check if any updates are needed
-  const hasNpmUpdates = scanResult.npm.auto_safe > 0;
-  const hasPhpUpdates = scanResult.php.auto_safe > 0;
+  const hasNpmUpdates = hasNpmEcosystem && (scanResult.npm.auto_safe > 0 || (options.authorizeBreakingNpm && scanResult.npm.breaking > 0));
+  const hasPhpUpdates = hasPhpEcosystem && (scanResult.php.auto_safe > 0 || (options.authorizeBreakingPhp && scanResult.php.breaking > 0));
 
   if (!hasNpmUpdates && !hasPhpUpdates) {
     logger.info('No auto-safe vulnerabilities found — no updates needed');
@@ -86,9 +92,9 @@ export async function runOrchestrator(
   }
 
   // Phase 2 — npm remediation
-  if (shouldRunPhase('npm', options) && hasNpmUpdates) {
+  if (shouldRunPhase('npm', options) && hasNpmEcosystem && hasNpmUpdates) {
     logger.info('=== Phase 2: npm Safe Updates ===');
-    const npmResult = await runNpmUpdater(runner, config, scanResult, options.cwd);
+    const npmResult = await runNpmUpdater(runner, config, scanResult, options.cwd, options.authorizeBreakingNpm);
     result.npmUpdate = npmResult;
 
     // Gate B validation
@@ -110,14 +116,16 @@ export async function runOrchestrator(
     logger.info(
       `npm update complete: ${npmResult.packages_updated.length} packages updated`,
     );
+  } else if (!hasNpmEcosystem) {
+    logger.info('Phase 2: Skipping npm update — npm ecosystem not configured');
   } else if (!hasNpmUpdates) {
     logger.info('Phase 2: Skipping npm update — no auto-safe npm vulnerabilities');
   }
 
   // Phase 3 — Composer remediation
-  if (shouldRunPhase('composer', options) && hasPhpUpdates) {
+  if (shouldRunPhase('composer', options) && hasPhpEcosystem && hasPhpUpdates) {
     logger.info('=== Phase 3: Composer Safe Updates ===');
-    const composerResult = await runComposerUpdater(runner, config, scanResult, options.cwd);
+    const composerResult = await runComposerUpdater(runner, config, scanResult, options.cwd, options.authorizeBreakingPhp);
     result.composerUpdate = composerResult;
 
     // Gate C validation
@@ -139,6 +147,8 @@ export async function runOrchestrator(
     logger.info(
       `Composer update complete: ${composerResult.packages_updated.length} packages updated`,
     );
+  } else if (!hasPhpEcosystem) {
+    logger.info('Phase 3: Skipping Composer update — PHP ecosystem not configured');
   } else if (!hasPhpUpdates) {
     logger.info('Phase 3: Skipping Composer update — no auto-safe PHP vulnerabilities');
   }

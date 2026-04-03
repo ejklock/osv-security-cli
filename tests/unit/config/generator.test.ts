@@ -37,7 +37,7 @@ describe('generateConfigYaml', () => {
     };
     expect(Array.isArray(parsed.protected_packages.composer)).toBe(true);
     expect(Array.isArray(parsed.protected_packages.npm)).toBe(true);
-    expect(yaml).toContain('# Examples:');
+    expect(yaml).toContain('# - package:');
   });
 
   it('includes a header comment', () => {

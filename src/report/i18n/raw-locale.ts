@@ -45,6 +45,7 @@ export interface RawLocale {
     pending_manual: string;
     fixed_version: string;        // vars: version
   };
+  authorization_format: string;
   consolidated: {
     title: string;                // vars: projectName
     label_date: string;

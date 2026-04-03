@@ -3,7 +3,8 @@ import type { ProjectConfig } from '../types/config.js';
 import type { ScanResultJson, EcosystemScanResult, VulnerabilityEntry } from '../types/scan.js';
 import { PhaseError, EnvironmentError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
-import { OSV } from '../utils/osv-commands.js';
+import { buildScanCommand, OSV } from '../utils/osv-commands.js';
+import { hasPhp, hasNpm } from '../types/config.js';
 import { classifyPackage } from '../policy/safe-update.js';
 
 function emptyEcosystem(): EcosystemScanResult {
@@ -216,9 +217,10 @@ async function assertOsvScannerAvailable(runner: CommandRunner, cwd: string): Pr
   }
 }
 
-async function executeScan(runner: CommandRunner, cwd: string) {
-  logger.debug(`Running: ${OSV.scanAll}`);
-  return runner.run(OSV.scanAll, { cwd });
+async function executeScan(runner: CommandRunner, config: ProjectConfig, cwd: string) {
+  const cmd = buildScanCommand(hasPhp(config), hasNpm(config));
+  logger.debug(`Running: ${cmd}`);
+  return runner.run(cmd, { cwd });
 }
 
 export async function runScanner(
@@ -242,11 +244,11 @@ export async function runScanner(
     await assertOsvScannerAvailable(runner, cwd);
 
     if (runner.dryRun) {
-      logger.info(`[DRY-RUN] Would execute: ${OSV.scanAll}`);
+      logger.info(`[DRY-RUN] Would execute: ${buildScanCommand(hasPhp(config), hasNpm(config))}`);
       return base;
     }
 
-    const scanResult = await executeScan(runner, cwd);
+    const scanResult = await executeScan(runner, config, cwd);
 
     if (scanResult.exitCode !== 0 && !scanResult.stdout) {
       return {

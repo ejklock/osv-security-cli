@@ -5,8 +5,6 @@ project:
 runtime:
   php: '8.1'
   node: '20.x'
-  package_manager_php: 'composer'
-  package_manager_js: 'npm'
   execution: 'docker'
   docker_service: 'app'
   test_command: 'php artisan test --compact'

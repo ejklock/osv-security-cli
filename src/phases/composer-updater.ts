@@ -59,6 +59,7 @@ export async function runComposerUpdater(
   config: ProjectConfig,
   scanResult: ScanResultJson,
   cwd: string,
+  authorizeBreaking = false,
 ): Promise<UpdateResultJson> {
   logger.info('Phase 3: Running Composer safe updates...');
 
@@ -75,13 +76,17 @@ export async function runComposerUpdater(
   };
 
   const autoSafePackageNames = extractPackageNames(scanResult.php.auto_safe_packages);
+  const breakingPackageNames = authorizeBreaking
+    ? extractPackageNames(scanResult.php.breaking_packages)
+    : [];
+  const packageNamesToUpdate = [...new Set([...autoSafePackageNames, ...breakingPackageNames])];
 
-  if (autoSafePackageNames.length === 0) {
-    return { ...base, tests_detail: 'No auto-safe packages to update' };
+  if (packageNamesToUpdate.length === 0) {
+    return { ...base, tests_detail: 'No packages to update' };
   }
 
   if (runner.dryRun) {
-    logger.info(`[DRY-RUN] Would execute: composer update ${autoSafePackageNames.join(' ')} --no-interaction`);
+    logger.info(`[DRY-RUN] Would execute: composer update ${packageNamesToUpdate.join(' ')} --no-interaction`);
     if (config.runtime.test_command) {
       logger.info(`[DRY-RUN] Would execute: ${config.runtime.test_command}`);
     }
@@ -98,7 +103,7 @@ export async function runComposerUpdater(
 
     await checkCurrentState(runner, cwd);
 
-    const updateResult = await applyComposerUpdate(runner, autoSafePackageNames, cwd);
+    const updateResult = await applyComposerUpdate(runner, packageNamesToUpdate, cwd);
     if (updateResult.exitCode !== 0) {
       return {
         ...base,

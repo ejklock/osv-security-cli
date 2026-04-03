@@ -12,40 +12,54 @@ project:
   client: '{{client}}'
 
 runtime:
+  {{#if hasPhp}}
   php: '{{phpVersion}}'
+  {{/if}}
+  {{#if hasNpm}}
   node: '{{nodeVersion}}'
-  package_manager_php: 'composer'
-  package_manager_js: 'npm'
+  {{/if}}
   execution: '{{execution}}'
   docker_service: '{{dockerService}}'{{#if dockerWorkdir}}
   docker_workdir: '{{dockerWorkdir}}'{{/if}}
+  {{#if hasPhp}}
   test_command: '{{testCommand}}'
+  {{/if}}
+  {{#if hasNpm}}
   build_commands:
     frontend: '{{frontendBuild}}'
     backend: '{{backendBuild}}'
+  {{/if}}
 
 # Add packages that must not be auto-upgraded beyond their constraint.
-# Examples:
-#   composer:
-#     - package: 'vendor/package'
-#       constraint: '^2.0'
-#       reason: 'Major upgrade requires project-wide migration'
-#   npm:
-#     - package: 'some-package'
-#       constraint: '^3.0.0'
-#       reason: 'v4 has breaking API changes'
 protected_packages:
+  {{#if hasPhp}}
+  composer:
+    []
+    # - package: 'vendor/package'
+    #   constraint: '^2.0'
+    #   reason: 'Major upgrade requires project-wide migration'
+  {{else}}
   composer: []
+  {{/if}}
+  {{#if hasNpm}}
+  npm:
+    []
+    # - package: 'some-package'
+    #   constraint: '^3.0.0'
+    #   reason: 'v4 has breaking API changes'
+  {{else}}
   npm: []
+  {{/if}}
 
 safe_update_policy:
   allow_patch_and_minor_within_constraints: true
   require_authorization_for_constraint_change: true
-  authorization_format: 'sim, confirmo breaking changes para [vendor/pacote]'
+  authorization_format: '{{authorizationFormat}}'
 
 conflict_resolution: 'stop_and_ask'
 
-# report_language: 'pt-br'             # optional — report language: 'pt-br' (default) or 'en'
+report_language: '{{reportLanguage}}'
+
 # reports_dir: '.osv-scanner/reports'  # optional — local output directory for reports (default shown)
 
 # cloud_storage:                         # optional — upload reports to cloud storage after generation

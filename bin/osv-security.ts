@@ -18,7 +18,7 @@ import {
   GateValidationError,
   PhaseError,
 } from "../src/utils/errors.js";
-import { prompt } from "../src/utils/prompt.js";
+import { prompt, promptConfirm, isInteractive } from "../src/utils/prompt.js";
 import { LocalStorageProvider } from "../src/storage/local.js";
 import { createStorageProvider } from "../src/storage/factory.js";
 import { runCloudSetup } from "../src/commands/cloud-setup.js";
@@ -62,9 +62,11 @@ program
     "--docker-workdir <path>",
     "Working directory inside the container (e.g. /var/www/html)",
   )
+  .option("--ecosystems <list>", "Comma-separated ecosystems: php,npm (default: php,npm)", "php,npm")
   .option("--php-version <version>", "PHP version", "8.2")
   .option("--node-version <version>", "Node.js version", "20.x")
   .option("--test-command <cmd>", "Test command", "php artisan test --compact")
+  .option("--report-language <lang>", "Report language: pt-br (default) or en", "pt-br")
   .option("--cwd <path>", "Working directory", process.cwd())
   .option(
     "--output <path>",
@@ -102,9 +104,11 @@ program
       execution: opts.execution as "docker" | "local",
       dockerService: opts.dockerService,
       dockerWorkdir: opts.dockerWorkdir,
+      ecosystems: (opts.ecosystems as string).split(',').map((s: string) => s.trim()) as ('php' | 'npm')[],
       phpVersion: opts.phpVersion,
       nodeVersion: opts.nodeVersion,
       testCommand: opts.testCommand,
+      reportLanguage: opts.reportLanguage as 'pt-br' | 'en',
     });
 
     await mkdir(dirname(outputPath), { recursive: true });
@@ -140,7 +144,9 @@ commonOptions(
       "Comma-separated phases: scan,npm,composer,report",
       "scan,npm,composer",
     )
-    .option("--no-report", "Skip executive report generation", false),
+    .option("--no-report", "Skip executive report generation", false)
+    .option("--authorize-breaking-php", "Authorize breaking-change updates for PHP/Composer packages", false)
+    .option("--authorize-breaking-npm", "Authorize breaking-change updates for npm packages", false),
 ).action(async (opts) => {
   await runCommand("fix", opts);
 });
@@ -216,6 +222,8 @@ async function runCommand(
     client?: string;
     project?: string;
     noReport?: boolean;
+    authorizeBreakingPhp?: boolean;
+    authorizeBreakingNpm?: boolean;
   },
 ): Promise<void> {
   if (opts.verbose) setLogLevel("debug");
@@ -249,12 +257,29 @@ async function runCommand(
 
       const scanBefore = await runScanner(runner, config, opts.cwd);
 
+      // Resolve breaking-change authorization: flag → prompt → deny
+      let authorizeBreakingPhp = opts.authorizeBreakingPhp ?? false;
+      let authorizeBreakingNpm = opts.authorizeBreakingNpm ?? false;
+
+      if (!authorizeBreakingPhp && scanBefore.php.breaking > 0 && isInteractive() && !opts.dryRun) {
+        const pkgs = scanBefore.php.breaking_packages.join(', ');
+        process.stdout.write(`\nPHP breaking-change packages found: ${pkgs}\n`);
+        authorizeBreakingPhp = await promptConfirm('Authorize breaking-change updates for PHP/Composer?');
+      }
+      if (!authorizeBreakingNpm && scanBefore.npm.breaking > 0 && isInteractive() && !opts.dryRun) {
+        const pkgs = scanBefore.npm.breaking_packages.join(', ');
+        process.stdout.write(`\nnpm breaking-change packages found: ${pkgs}\n`);
+        authorizeBreakingNpm = await promptConfirm('Authorize breaking-change updates for npm?');
+      }
+
       const result = await runOrchestrator(runner, config, {
         configPath: opts.config,
         cwd: opts.cwd,
         dryRun: opts.dryRun,
         verbose: opts.verbose,
         phases,
+        authorizeBreakingPhp,
+        authorizeBreakingNpm,
       });
 
       if (result.scan) {

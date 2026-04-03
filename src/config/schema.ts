@@ -7,10 +7,8 @@ const ProtectedPackageSchema = z.object({
 });
 
 const RuntimeConfigSchema = z.object({
-  php: z.string(),
-  node: z.string(),
-  package_manager_php: z.string(),
-  package_manager_js: z.string(),
+  php: z.string().optional(),
+  node: z.string().optional(),
   execution: z.enum(['docker', 'local']),
   docker_service: z.string(),
   docker_workdir: z.string().optional(),
@@ -19,7 +17,10 @@ const RuntimeConfigSchema = z.object({
     frontend: z.string(),
     backend: z.string(),
   }).optional(),
-});
+}).refine(
+  (r) => r.php !== undefined || r.node !== undefined,
+  { message: 'At least one ecosystem must be configured: php or node', path: ['php'] },
+);
 
 const CloudStorageConfigSchema = z.object({
   provider: z.enum(['google_drive']),

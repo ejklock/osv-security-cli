@@ -28,6 +28,25 @@ async function runNpmUpdate(runner: CommandRunner, cwd: string): Promise<Command
   return runner.run('npm update', { cwd, stream: true });
 }
 
+async function installBreakingPackages(
+  runner: CommandRunner,
+  scanResult: ScanResultJson,
+  cwd: string,
+): Promise<void> {
+  const pkgs = scanResult.npm.vulnerabilities
+    .filter((v) => v.classification === 'breaking' && v.safeVersion)
+    .reduce<Map<string, string>>((map, v) => {
+      if (!map.has(v.package)) map.set(v.package, v.safeVersion!);
+      return map;
+    }, new Map());
+
+  if (pkgs.size === 0) return;
+
+  const specs = [...pkgs.entries()].map(([name, ver]) => `${name}@${ver}`).join(' ');
+  logger.info(`Installing authorized breaking-change packages: ${specs}`);
+  await runner.run(`npm install ${specs}`, { cwd, stream: true });
+}
+
 async function validateBuilds(
   runner: CommandRunner,
   config: ProjectConfig,
@@ -59,6 +78,7 @@ export async function runNpmUpdater(
   config: ProjectConfig,
   scanResult: ScanResultJson,
   cwd: string,
+  authorizeBreaking = false,
 ): Promise<UpdateResultJson> {
   logger.info('Phase 2: Running npm safe updates...');
 
@@ -79,6 +99,7 @@ export async function runNpmUpdater(
   if (runner.dryRun) {
     logger.info(`[DRY-RUN] Would execute: ${OSV.fixNpm}`);
     logger.info('[DRY-RUN] Would execute: npm update');
+    if (authorizeBreaking) logger.info('[DRY-RUN] Would install authorized breaking-change packages');
     if (config.runtime.build_commands) {
       logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.frontend}`);
       logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.backend}`);
@@ -101,6 +122,10 @@ export async function runNpmUpdater(
         build_status: 'fail',
         error: `npm update failed: ${updateResult.stderr}`,
       };
+    }
+
+    if (authorizeBreaking) {
+      await installBreakingPackages(runner, scanResult, cwd);
     }
 
     let buildStatus: UpdateResultJson['build_status'] = 'skipped';

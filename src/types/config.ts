@@ -8,10 +8,8 @@ export interface ProtectedPackage {
 }
 
 export interface RuntimeConfig {
-  php: string;
-  node: string;
-  package_manager_php: string;
-  package_manager_js: string;
+  php?: string;
+  node?: string;
   execution: ExecutionEnv;
   docker_service: string;
   docker_workdir?: string;
@@ -20,6 +18,14 @@ export interface RuntimeConfig {
     frontend: string;
     backend: string;
   };
+}
+
+export function hasPhp(config: ProjectConfig): boolean {
+  return !!config.runtime.php;
+}
+
+export function hasNpm(config: ProjectConfig): boolean {
+  return !!config.runtime.node;
 }
 
 export interface CloudStorageConfig {
