@@ -1,14 +1,14 @@
 import type { CommandRunner, PhaseStatus } from '../types/common.js';
 import type { ProjectConfig } from '../types/config.js';
-import { hasPhp, hasNpm } from '../types/config.js';
-import type { ScanResultJson } from '../types/scan.js';
+import type { ScanResultJson, EcosystemScanResult } from '../types/scan.js';
 import type { UpdateResultJson } from '../types/update.js';
+import type { EcosystemUpdater } from './updater.js';
 import { validateGateA, validateGateB, validateGateC } from '../gates/validator.js';
 import { GateValidationError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { runScanner } from './scanner.js';
-import { runNpmUpdater } from './npm-updater.js';
-import { runComposerUpdater } from './composer-updater.js';
+import { npmUpdater } from './npm-updater.js';
+import { composerUpdater } from './composer-updater.js';
 
 export interface OrchestratorOptions {
   configPath: string;
@@ -26,9 +26,70 @@ export interface OrchestratorOptions {
 
 export interface OrchestratorResult {
   scan: ScanResultJson | null;
+  // TODO(TP-003): Replace named fields with `updateResults: Record<string, UpdateResultJson>`
+  // once ScanResultJson is refactored to use `ecosystems: Record<string, EcosystemScanResult>`.
   npmUpdate: UpdateResultJson | null;
   composerUpdate: UpdateResultJson | null;
   overallStatus: PhaseStatus;
+}
+
+/**
+ * Registry of all supported ecosystem updaters.
+ * Order matters: npm runs before composer, matching the original phase order.
+ * To add a new ecosystem, implement EcosystemUpdater and append it here.
+ */
+const UPDATER_REGISTRY: EcosystemUpdater[] = [npmUpdater, composerUpdater];
+
+/**
+ * Extracts the per-ecosystem scan result slice for the given ecosystem name.
+ * NOTE: This helper will be removed when TP-003 migrates ScanResultJson to
+ * use `ecosystems: Record<string, EcosystemScanResult>`.
+ */
+function getScanSlice(
+  scanResult: ScanResultJson,
+  ecosystem: string,
+): EcosystemScanResult | null {
+  if (ecosystem === 'npm') return scanResult.npm;
+  if (ecosystem === 'composer') return scanResult.php;
+  return null;
+}
+
+/**
+ * Returns the authorizeBreaking flag for the given ecosystem.
+ */
+function getAuthorizeBreaking(ecosystem: string, options: OrchestratorOptions): boolean {
+  if (ecosystem === 'npm') return options.authorizeBreakingNpm ?? false;
+  if (ecosystem === 'composer') return options.authorizeBreakingPhp ?? false;
+  return false;
+}
+
+/**
+ * Returns the gate validation function for the given ecosystem.
+ * Gate B → npm, Gate C → composer.
+ */
+function getGateValidator(
+  ecosystem: string,
+): ((data: unknown) => ReturnType<typeof validateGateB>) | null {
+  if (ecosystem === 'npm') return validateGateB;
+  if (ecosystem === 'composer') return validateGateC;
+  return null;
+}
+
+/**
+ * Returns the gate label for error messages.
+ */
+function getGateLabel(ecosystem: string): string {
+  if (ecosystem === 'npm') return 'B';
+  if (ecosystem === 'composer') return 'C';
+  return ecosystem.toUpperCase();
+}
+
+/**
+ * Checks whether the phase name (in options.phases) is enabled for this ecosystem.
+ */
+function isPhaseEnabled(ecosystem: string, options: OrchestratorOptions): boolean {
+  if (!options.phases) return true;
+  return options.phases.includes(ecosystem as 'npm' | 'composer');
 }
 
 function shouldRunPhase(
@@ -79,78 +140,95 @@ export async function runOrchestrator(
       `(${scanResult.npm.auto_safe} auto-safe, ${scanResult.npm.breaking} breaking)`,
   );
 
-  const hasPhpEcosystem = hasPhp(config);
-  const hasNpmEcosystem = hasNpm(config);
+  // Check if any updates are needed across all registered updaters
+  const anyUpdatesNeeded = UPDATER_REGISTRY.some((updater) => {
+    if (!updater.isConfigured(config)) return false;
+    const slice = getScanSlice(scanResult, updater.ecosystem);
+    if (!slice) return false;
+    const authorizeBreaking = getAuthorizeBreaking(updater.ecosystem, options);
+    return slice.auto_safe > 0 || (authorizeBreaking && slice.breaking > 0);
+  });
 
-  // Check if any updates are needed
-  const hasNpmUpdates = hasNpmEcosystem && (scanResult.npm.auto_safe > 0 || (options.authorizeBreakingNpm && scanResult.npm.breaking > 0));
-  const hasPhpUpdates = hasPhpEcosystem && (scanResult.php.auto_safe > 0 || (options.authorizeBreakingPhp && scanResult.php.breaking > 0));
-
-  if (!hasNpmUpdates && !hasPhpUpdates) {
+  if (!anyUpdatesNeeded) {
     logger.info('No auto-safe vulnerabilities found — no updates needed');
     return result;
   }
 
-  // Phase 2 — npm remediation
-  if (shouldRunPhase('npm', options) && hasNpmEcosystem && hasNpmUpdates) {
-    logger.info('=== Phase 2: npm Safe Updates ===');
-    const npmResult = await runNpmUpdater(runner, config, scanResult, options.cwd, options.authorizeBreakingNpm);
-    result.npmUpdate = npmResult;
+  // Registry loop — Phase 2+ (one iteration per registered updater)
+  let phaseNumber = 2;
+  for (const updater of UPDATER_REGISTRY) {
+    const { ecosystem } = updater;
 
-    // Gate B validation
-    const gateB = validateGateB(npmResult);
-    if (!gateB.valid) {
-      throw new GateValidationError(
-        `Gate B validation failed: ${gateB.errors.join(', ')}`,
-        'B',
-        gateB.errors,
-      );
+    if (!isPhaseEnabled(ecosystem, options)) {
+      logger.info(`Phase ${phaseNumber}: Skipping ${ecosystem} update — not in phases list`);
+      phaseNumber++;
+      continue;
     }
 
-    if (npmResult.build_status === 'fail') {
-      logger.error('npm build failed — stopping before Composer phase');
+    if (!updater.isConfigured(config)) {
+      logger.info(`Phase ${phaseNumber}: Skipping ${ecosystem} update — ecosystem not configured`);
+      phaseNumber++;
+      continue;
+    }
+
+    const slice = getScanSlice(scanResult, ecosystem);
+    if (!slice) {
+      logger.info(`Phase ${phaseNumber}: Skipping ${ecosystem} update — no scan data`);
+      phaseNumber++;
+      continue;
+    }
+
+    const authorizeBreaking = getAuthorizeBreaking(ecosystem, options);
+    const hasUpdates = slice.auto_safe > 0 || (authorizeBreaking && slice.breaking > 0);
+
+    if (!hasUpdates) {
+      logger.info(`Phase ${phaseNumber}: Skipping ${ecosystem} update — no auto-safe vulnerabilities`);
+      phaseNumber++;
+      continue;
+    }
+
+    logger.info(`=== Phase ${phaseNumber}: ${ecosystem.charAt(0).toUpperCase() + ecosystem.slice(1)} Safe Updates ===`);
+
+    const updateResult = await updater.run({
+      runner,
+      config,
+      scanResult: slice,
+      cwd: options.cwd,
+      authorizeBreaking,
+    });
+
+    // Store result in named field (TODO(TP-003): replace with updateResults Record)
+    if (ecosystem === 'npm') result.npmUpdate = updateResult;
+    if (ecosystem === 'composer') result.composerUpdate = updateResult;
+
+    // Gate validation (B for npm, C for composer)
+    const gateLabel = getGateLabel(ecosystem);
+    const validate = getGateValidator(ecosystem);
+    if (validate) {
+      const gateResult = validate(updateResult);
+      if (!gateResult.valid) {
+        throw new GateValidationError(
+          `Gate ${gateLabel} validation failed: ${gateResult.errors.join(', ')}`,
+          gateLabel as 'B' | 'C',
+          gateResult.errors,
+        );
+      }
+    }
+
+    // Stop on build failure (npm) or test failure (composer)
+    if (updateResult.build_status === 'fail') {
+      logger.error(`${ecosystem} build failed — stopping pipeline`);
+      result.overallStatus = 'error';
+      return result;
+    }
+    if (updateResult.tests === 'fail') {
+      logger.error(`${ecosystem} tests failed — stopping pipeline`);
       result.overallStatus = 'error';
       return result;
     }
 
-    logger.info(
-      `npm update complete: ${npmResult.packages_updated.length} packages updated`,
-    );
-  } else if (!hasNpmEcosystem) {
-    logger.info('Phase 2: Skipping npm update — npm ecosystem not configured');
-  } else if (!hasNpmUpdates) {
-    logger.info('Phase 2: Skipping npm update — no auto-safe npm vulnerabilities');
-  }
-
-  // Phase 3 — Composer remediation
-  if (shouldRunPhase('composer', options) && hasPhpEcosystem && hasPhpUpdates) {
-    logger.info('=== Phase 3: Composer Safe Updates ===');
-    const composerResult = await runComposerUpdater(runner, config, scanResult, options.cwd, options.authorizeBreakingPhp);
-    result.composerUpdate = composerResult;
-
-    // Gate C validation
-    const gateC = validateGateC(composerResult);
-    if (!gateC.valid) {
-      throw new GateValidationError(
-        `Gate C validation failed: ${gateC.errors.join(', ')}`,
-        'C',
-        gateC.errors,
-      );
-    }
-
-    if (composerResult.tests === 'fail') {
-      logger.error('Composer tests failed — workflow stopped');
-      result.overallStatus = 'error';
-      return result;
-    }
-
-    logger.info(
-      `Composer update complete: ${composerResult.packages_updated.length} packages updated`,
-    );
-  } else if (!hasPhpEcosystem) {
-    logger.info('Phase 3: Skipping Composer update — PHP ecosystem not configured');
-  } else if (!hasPhpUpdates) {
-    logger.info('Phase 3: Skipping Composer update — no auto-safe PHP vulnerabilities');
+    logger.info(`${ecosystem} update complete: ${updateResult.packages_updated.length} packages updated`);
+    phaseNumber++;
   }
 
   // Check if there are pending items
