@@ -25,7 +25,7 @@ const ScanResultSchema = z.object({
 
 const UpdateResultSchema = z.object({
   $schema: z.literal('osv-update-result/v1'),
-  agent: z.enum(['composer-safe-update', 'npm-safe-update']),
+  agent: z.string(),
   status: z.enum(['success', 'error', 'skipped']),
   packages_updated: z.array(z.string()),
   packages_skipped: z.array(z.string()),
@@ -65,13 +65,6 @@ export function validateGateB(data: unknown): GateResult {
       errors: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
     };
   }
-  if (result.data.agent !== 'npm-safe-update') {
-    return {
-      valid: false,
-      gate: 'B',
-      errors: [`Expected agent "npm-safe-update", got "${result.data.agent}"`],
-    };
-  }
   if (result.data.status === 'error') {
     return {
       valid: false,
@@ -89,13 +82,6 @@ export function validateGateC(data: unknown): GateResult {
       valid: false,
       gate: 'C',
       errors: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-    };
-  }
-  if (result.data.agent !== 'composer-safe-update') {
-    return {
-      valid: false,
-      gate: 'C',
-      errors: [`Expected agent "composer-safe-update", got "${result.data.agent}"`],
     };
   }
   if (result.data.status === 'error') {

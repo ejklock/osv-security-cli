@@ -1,7 +1,8 @@
 import type { CommandRunner, CommandResult } from '../types/common.js';
 import type { ProjectConfig } from '../types/config.js';
+import type { EcosystemScanResult } from '../types/scan.js';
 import type { UpdateResultJson } from '../types/update.js';
-import type { ScanResultJson } from '../types/scan.js';
+import type { EcosystemUpdater, UpdateContext } from './updater.js';
 import { PhaseError } from '../utils/errors.js';
 import { backupFiles, restoreFiles } from '../utils/git.js';
 import { logger } from '../utils/logger.js';
@@ -30,10 +31,10 @@ async function runNpmUpdate(runner: CommandRunner, cwd: string): Promise<Command
 
 async function installBreakingPackages(
   runner: CommandRunner,
-  scanResult: ScanResultJson,
+  scanResult: EcosystemScanResult,
   cwd: string,
 ): Promise<void> {
-  const pkgs = scanResult.npm.vulnerabilities
+  const pkgs = scanResult.vulnerabilities
     .filter((v) => v.classification === 'breaking' && v.safeVersion)
     .reduce<Map<string, string>>((map, v) => {
       if (!map.has(v.package)) map.set(v.package, v.safeVersion!);
@@ -73,108 +74,114 @@ async function verifyResidualVulnerabilities(runner: CommandRunner, cwd: string)
   await runner.run(OSV.scanNpm, { cwd });
 }
 
-export async function runNpmUpdater(
-  runner: CommandRunner,
-  config: ProjectConfig,
-  scanResult: ScanResultJson,
-  cwd: string,
-  authorizeBreaking = false,
-): Promise<UpdateResultJson> {
-  logger.info('Phase 2: Running npm safe updates...');
+class NpmUpdater implements EcosystemUpdater {
+  ecosystem = 'npm';
+  lockFiles = ['package.json', 'package-lock.json'];
 
-  const base: UpdateResultJson = {
-    $schema: 'osv-update-result/v1',
-    agent: 'npm-safe-update',
-    status: 'success',
-    packages_updated: [],
-    packages_skipped: [],
-    packages_pending_breaking: scanResult.npm.breaking_packages,
-    tests: 'skipped',
-    tests_detail: 'Build validated; unit tests not applicable to npm phase',
-    build_status: 'skipped',
-    build_detail: '',
-    error: null,
-  };
-
-  if (runner.dryRun) {
-    logger.info(`[DRY-RUN] Would execute: ${OSV.fixNpm}`);
-    logger.info('[DRY-RUN] Would execute: npm update');
-    if (authorizeBreaking) logger.info('[DRY-RUN] Would install authorized breaking-change packages');
-    if (config.runtime.build_commands) {
-      logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.frontend}`);
-      logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.backend}`);
-    }
-    logger.info(`[DRY-RUN] Would execute: ${OSV.scanNpm}`);
-    return { ...base, build_status: config.runtime.build_commands ? 'pass' : 'skipped', build_detail: 'Dry-run — not executed' };
+  isConfigured(config: ProjectConfig): boolean {
+    return !!config.runtime.node;
   }
 
-  try {
-    const backups = await backupFiles(NPM_FILES, cwd);
+  async run(ctx: UpdateContext): Promise<UpdateResultJson> {
+    const { runner, config, scanResult, cwd, authorizeBreaking } = ctx;
+    logger.info('Phase 2: Running npm safe updates...');
 
-    await checkCurrentState(runner, cwd);
-    await applyOsvFix(runner, cwd);
+    const base: UpdateResultJson = {
+      $schema: 'osv-update-result/v1',
+      agent: 'npm-safe-update',
+      status: 'success',
+      packages_updated: [],
+      packages_skipped: [],
+      packages_pending_breaking: scanResult.breaking_packages,
+      tests: 'skipped',
+      tests_detail: 'Build validated; unit tests not applicable to npm phase',
+      build_status: 'skipped',
+      build_detail: '',
+      error: null,
+    };
 
-    const updateResult = await runNpmUpdate(runner, cwd);
-    if (updateResult.exitCode !== 0) {
+    if (runner.dryRun) {
+      logger.info(`[DRY-RUN] Would execute: ${OSV.fixNpm}`);
+      logger.info('[DRY-RUN] Would execute: npm update');
+      if (authorizeBreaking) logger.info('[DRY-RUN] Would install authorized breaking-change packages');
+      if (config.runtime.build_commands) {
+        logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.frontend}`);
+        logger.info(`[DRY-RUN] Would execute: ${config.runtime.build_commands.backend}`);
+      }
+      logger.info(`[DRY-RUN] Would execute: ${OSV.scanNpm}`);
+      return { ...base, build_status: config.runtime.build_commands ? 'pass' : 'skipped', build_detail: 'Dry-run — not executed' };
+    }
+
+    try {
+      const backups = await backupFiles(NPM_FILES, cwd);
+
+      await checkCurrentState(runner, cwd);
+      await applyOsvFix(runner, cwd);
+
+      const updateResult = await runNpmUpdate(runner, cwd);
+      if (updateResult.exitCode !== 0) {
+        return {
+          ...base,
+          status: 'error',
+          build_status: 'fail',
+          error: `npm update failed: ${updateResult.stderr}`,
+        };
+      }
+
+      if (authorizeBreaking) {
+        await installBreakingPackages(runner, scanResult, cwd);
+      }
+
+      let buildStatus: UpdateResultJson['build_status'] = 'skipped';
+      let buildDetail = 'No build_commands configured — skipped';
+
+      if (config.runtime.build_commands) {
+        const { frontend, backend } = await validateBuilds(runner, config, cwd);
+
+        if (frontend.exitCode !== 0) {
+          logger.error('Frontend build failed — reverting...');
+          await revertNpmChanges(runner, backups, cwd);
+          return {
+            ...base,
+            status: 'error',
+            build_status: 'fail',
+            build_detail: `Frontend build failed: ${frontend.stderr}`,
+            error: 'Frontend build failed after npm update — changes reverted',
+          };
+        }
+
+        if (backend.exitCode !== 0) {
+          logger.error('Backend build failed — reverting...');
+          await revertNpmChanges(runner, backups, cwd);
+          return {
+            ...base,
+            status: 'error',
+            build_status: 'fail',
+            build_detail: `Backend build failed: ${backend.stderr}`,
+            error: 'Backend build failed after npm update — changes reverted',
+          };
+        }
+
+        buildStatus = 'pass';
+        buildDetail = 'Frontend and backend builds passed after update';
+      }
+
+      await verifyResidualVulnerabilities(runner, cwd);
+
       return {
         ...base,
-        status: 'error',
-        build_status: 'fail',
-        error: `npm update failed: ${updateResult.stderr}`,
+        packages_updated: scanResult.auto_safe_packages,
+        build_status: buildStatus,
+        build_detail: buildDetail,
       };
+    } catch (err) {
+      throw new PhaseError(
+        `npm updater phase failed: ${err instanceof Error ? err.message : String(err)}`,
+        'npm-updater',
+        err,
+      );
     }
-
-    if (authorizeBreaking) {
-      await installBreakingPackages(runner, scanResult, cwd);
-    }
-
-    let buildStatus: UpdateResultJson['build_status'] = 'skipped';
-    let buildDetail = 'No build_commands configured — skipped';
-
-    if (config.runtime.build_commands) {
-      const { frontend, backend } = await validateBuilds(runner, config, cwd);
-
-      if (frontend.exitCode !== 0) {
-        logger.error('Frontend build failed — reverting...');
-        await revertNpmChanges(runner, backups, cwd);
-        return {
-          ...base,
-          status: 'error',
-          build_status: 'fail',
-          build_detail: `Frontend build failed: ${frontend.stderr}`,
-          error: 'Frontend build failed after npm update — changes reverted',
-        };
-      }
-
-      if (backend.exitCode !== 0) {
-        logger.error('Backend build failed — reverting...');
-        await revertNpmChanges(runner, backups, cwd);
-        return {
-          ...base,
-          status: 'error',
-          build_status: 'fail',
-          build_detail: `Backend build failed: ${backend.stderr}`,
-          error: 'Backend build failed after npm update — changes reverted',
-        };
-      }
-
-      buildStatus = 'pass';
-      buildDetail = 'Frontend and backend builds passed after update';
-    }
-
-    await verifyResidualVulnerabilities(runner, cwd);
-
-    return {
-      ...base,
-      packages_updated: scanResult.npm.auto_safe_packages,
-      build_status: buildStatus,
-      build_detail: buildDetail,
-    };
-  } catch (err) {
-    throw new PhaseError(
-      `npm updater phase failed: ${err instanceof Error ? err.message : String(err)}`,
-      'npm-updater',
-      err,
-    );
   }
 }
+
+export const npmUpdater: EcosystemUpdater = new NpmUpdater();

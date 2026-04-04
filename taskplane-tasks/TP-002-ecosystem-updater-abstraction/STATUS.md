@@ -31,41 +31,41 @@
 ---
 
 ### Step 2: Refactor NpmUpdater
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] `NpmUpdater` implements `EcosystemUpdater` with `ecosystem`, `lockFiles`, `isConfigured`, `run`
-- [ ] Singleton exported from `npm-updater.ts`
-- [ ] Targeted tests pass
+- [x] `NpmUpdater` implements `EcosystemUpdater` with `ecosystem`, `lockFiles`, `isConfigured`, `run`
+- [x] Singleton exported from `npm-updater.ts`
+- [x] Targeted tests pass
 
 ---
 
 ### Step 3: Refactor ComposerUpdater
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] `ComposerUpdater` implements `EcosystemUpdater` with `ecosystem`, `lockFiles`, `isConfigured`, `run`
-- [ ] Singleton exported from `composer-updater.ts`
-- [ ] Targeted tests pass
+- [x] `ComposerUpdater` implements `EcosystemUpdater` with `ecosystem`, `lockFiles`, `isConfigured`, `run`
+- [x] Singleton exported from `composer-updater.ts`
+- [x] Targeted tests pass
 
 ---
 
 ### Step 4: Refactor Orchestrator to Use Registry
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] `UPDATER_REGISTRY` array defined with npm and composer updaters
-- [ ] Hardcoded phase blocks replaced with registry loop
-- [ ] Loop skips unconfigured updaters and empty scan results
-- [ ] Gate validation preserved per ecosystem
-- [ ] Integration tests pass
+- [x] `UPDATER_REGISTRY` array defined with npm and composer updaters
+- [x] Hardcoded phase blocks replaced with registry loop
+- [x] Loop skips unconfigured updaters and empty scan results
+- [x] Gate validation preserved per ecosystem
+- [x] Integration tests pass
 
 ---
 
 ### Step 5: Update Types and Gate Validators
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] `UpdateResultJson.agent` widened to `string`
-- [ ] `UpdateResultSchema.agent` updated in validator
-- [ ] Gate B/C agent-identity checks updated or removed
-- [ ] Unit tests pass
+- [x] `UpdateResultJson.agent` widened to `string`
+- [x] `UpdateResultSchema.agent` updated in validator
+- [x] Gate B/C agent-identity checks removed; gates now validate structure and status only
+- [x] Unit tests pass
 
 ---
 

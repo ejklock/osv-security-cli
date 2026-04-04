@@ -2,7 +2,7 @@ import type { PhaseStatus } from './common.js';
 
 export interface UpdateResultJson {
   $schema: 'osv-update-result/v1';
-  agent: 'composer-safe-update' | 'npm-safe-update';
+  agent: string;
   status: PhaseStatus;
   packages_updated: string[];
   packages_skipped: string[];

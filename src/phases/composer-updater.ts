@@ -1,7 +1,8 @@
 import type { CommandRunner, CommandResult } from '../types/common.js';
 import type { ProjectConfig } from '../types/config.js';
+import type { EcosystemScanResult } from '../types/scan.js';
 import type { UpdateResultJson } from '../types/update.js';
-import type { ScanResultJson } from '../types/scan.js';
+import type { EcosystemUpdater, UpdateContext } from './updater.js';
 import { PhaseError } from '../utils/errors.js';
 import { backupFiles, restoreFiles } from '../utils/git.js';
 import { logger } from '../utils/logger.js';
@@ -54,98 +55,104 @@ async function verifyResidualVulnerabilities(runner: CommandRunner, cwd: string)
   await runner.run(OSV.scanPhp, { cwd });
 }
 
-export async function runComposerUpdater(
-  runner: CommandRunner,
-  config: ProjectConfig,
-  scanResult: ScanResultJson,
-  cwd: string,
-  authorizeBreaking = false,
-): Promise<UpdateResultJson> {
-  logger.info('Phase 3: Running Composer safe updates...');
+class ComposerUpdater implements EcosystemUpdater {
+  ecosystem = 'composer';
+  lockFiles = ['composer.json', 'composer.lock'];
 
-  const base: UpdateResultJson = {
-    $schema: 'osv-update-result/v1',
-    agent: 'composer-safe-update',
-    status: 'success',
-    packages_updated: [],
-    packages_skipped: [],
-    packages_pending_breaking: scanResult.php.breaking_packages,
-    tests: 'skipped',
-    tests_detail: '',
-    error: null,
-  };
-
-  const autoSafePackageNames = extractPackageNames(scanResult.php.auto_safe_packages);
-  const breakingPackageNames = authorizeBreaking
-    ? extractPackageNames(scanResult.php.breaking_packages)
-    : [];
-  const packageNamesToUpdate = [...new Set([...autoSafePackageNames, ...breakingPackageNames])];
-
-  if (packageNamesToUpdate.length === 0) {
-    return { ...base, tests_detail: 'No packages to update' };
+  isConfigured(config: ProjectConfig): boolean {
+    return !!config.runtime.php;
   }
 
-  if (runner.dryRun) {
-    logger.info(`[DRY-RUN] Would execute: composer update ${packageNamesToUpdate.join(' ')} --no-interaction`);
-    if (config.runtime.test_command) {
-      logger.info(`[DRY-RUN] Would execute: ${config.runtime.test_command}`);
-    }
-    logger.info(`[DRY-RUN] Would execute: ${OSV.scanPhp}`);
-    return {
-      ...base,
-      packages_updated: scanResult.php.auto_safe_packages,
-      tests_detail: 'Dry-run — not executed',
+  async run(ctx: UpdateContext): Promise<UpdateResultJson> {
+    const { runner, config, scanResult, cwd, authorizeBreaking } = ctx;
+    logger.info('Phase 3: Running Composer safe updates...');
+
+    const base: UpdateResultJson = {
+      $schema: 'osv-update-result/v1',
+      agent: 'composer-safe-update',
+      status: 'success',
+      packages_updated: [],
+      packages_skipped: [],
+      packages_pending_breaking: scanResult.breaking_packages,
+      tests: 'skipped',
+      tests_detail: '',
+      error: null,
     };
-  }
 
-  try {
-    const backups = await backupFiles(COMPOSER_FILES, cwd);
+    const autoSafePackageNames = extractPackageNames(scanResult.auto_safe_packages);
+    const breakingPackageNames = authorizeBreaking
+      ? extractPackageNames(scanResult.breaking_packages)
+      : [];
+    const packageNamesToUpdate = [...new Set([...autoSafePackageNames, ...breakingPackageNames])];
 
-    await checkCurrentState(runner, cwd);
+    if (packageNamesToUpdate.length === 0) {
+      return { ...base, tests_detail: 'No packages to update' };
+    }
 
-    const updateResult = await applyComposerUpdate(runner, packageNamesToUpdate, cwd);
-    if (updateResult.exitCode !== 0) {
+    if (runner.dryRun) {
+      logger.info(`[DRY-RUN] Would execute: composer update ${packageNamesToUpdate.join(' ')} --no-interaction`);
+      if (config.runtime.test_command) {
+        logger.info(`[DRY-RUN] Would execute: ${config.runtime.test_command}`);
+      }
+      logger.info(`[DRY-RUN] Would execute: ${OSV.scanPhp}`);
       return {
         ...base,
-        status: 'error',
-        tests: 'skipped',
-        error: `composer update failed: ${updateResult.stderr}`,
+        packages_updated: scanResult.auto_safe_packages,
+        tests_detail: 'Dry-run — not executed',
       };
     }
 
-    let tests: UpdateResultJson['tests'] = 'skipped';
-    let testsDetail = 'No test_command configured — skipped';
+    try {
+      const backups = await backupFiles(COMPOSER_FILES, cwd);
 
-    if (config.runtime.test_command) {
-      const testResult = await runTestSuite(runner, config.runtime.test_command, cwd);
-      if (testResult.exitCode !== 0) {
-        logger.error('Tests failed — reverting Composer updates...');
-        await revertComposerChanges(runner, backups, cwd);
+      await checkCurrentState(runner, cwd);
+
+      const updateResult = await applyComposerUpdate(runner, packageNamesToUpdate, cwd);
+      if (updateResult.exitCode !== 0) {
         return {
           ...base,
           status: 'error',
-          tests: 'fail',
-          tests_detail: testResult.stdout || testResult.stderr,
-          error: 'Tests failed after composer update — changes reverted',
+          tests: 'skipped',
+          error: `composer update failed: ${updateResult.stderr}`,
         };
       }
-      tests = 'pass';
-      testsDetail = testResult.stdout.trim().split('\n').slice(-2).join(' ') || 'Tests passed';
+
+      let tests: UpdateResultJson['tests'] = 'skipped';
+      let testsDetail = 'No test_command configured — skipped';
+
+      if (config.runtime.test_command) {
+        const testResult = await runTestSuite(runner, config.runtime.test_command, cwd);
+        if (testResult.exitCode !== 0) {
+          logger.error('Tests failed — reverting Composer updates...');
+          await revertComposerChanges(runner, backups, cwd);
+          return {
+            ...base,
+            status: 'error',
+            tests: 'fail',
+            tests_detail: testResult.stdout || testResult.stderr,
+            error: 'Tests failed after composer update — changes reverted',
+          };
+        }
+        tests = 'pass';
+        testsDetail = testResult.stdout.trim().split('\n').slice(-2).join(' ') || 'Tests passed';
+      }
+
+      await verifyResidualVulnerabilities(runner, cwd);
+
+      return {
+        ...base,
+        packages_updated: scanResult.auto_safe_packages,
+        tests,
+        tests_detail: testsDetail,
+      };
+    } catch (err) {
+      throw new PhaseError(
+        `Composer updater phase failed: ${err instanceof Error ? err.message : String(err)}`,
+        'composer-updater',
+        err,
+      );
     }
-
-    await verifyResidualVulnerabilities(runner, cwd);
-
-    return {
-      ...base,
-      packages_updated: scanResult.php.auto_safe_packages,
-      tests,
-      tests_detail: testsDetail,
-    };
-  } catch (err) {
-    throw new PhaseError(
-      `Composer updater phase failed: ${err instanceof Error ? err.message : String(err)}`,
-      'composer-updater',
-      err,
-    );
   }
 }
+
+export const composerUpdater: EcosystemUpdater = new ComposerUpdater();

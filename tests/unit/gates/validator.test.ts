@@ -59,11 +59,11 @@ describe('validateGateB (npm updater)', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('fails for composer agent in Gate B', async () => {
+  it('accepts any valid update result regardless of agent string', async () => {
     const data = await loadFixture('update-result-composer.json');
     const result = validateGateB(data);
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]).toContain('npm-safe-update');
+    // Gate B validates structure and status; agent identity is now the updater's responsibility
+    expect(result.valid).toBe(true);
   });
 
   it('fails for missing packages_updated', () => {
@@ -84,11 +84,11 @@ describe('validateGateC (composer updater)', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('fails for npm agent in Gate C', async () => {
+  it('accepts any valid update result regardless of agent string', async () => {
     const data = await loadFixture('update-result-npm.json');
     const result = validateGateC(data);
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]).toContain('composer-safe-update');
+    // Gate C validates structure and status; agent identity is now the updater's responsibility
+    expect(result.valid).toBe(true);
   });
 
   it('fails when status is error', () => {
