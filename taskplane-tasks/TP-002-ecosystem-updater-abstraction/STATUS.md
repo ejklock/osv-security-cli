@@ -1,7 +1,7 @@
 # TP-002: EcosystemUpdater Interface and Updater Refactor — Status
 
-**Current Step:** Step 0: Preflight
-**Status:** 🟡 In Progress
+**Current Step:** Step 7: Documentation & Delivery
+**Status:** ✅ Complete
 **Last Updated:** 2026-04-04
 **Review Level:** 1
 **Review Counter:** 0
@@ -70,19 +70,19 @@
 ---
 
 ### Step 6: Testing & Verification
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] FULL test suite passing
-- [ ] All failures fixed
-- [ ] Build passes
+- [x] FULL test suite passing
+- [x] All failures fixed
+- [x] Build passes
 
 ---
 
 ### Step 7: Documentation & Delivery
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] `taskplane-tasks/CONTEXT.md` updated
-- [ ] Discoveries logged
+- [x] `taskplane-tasks/CONTEXT.md` updated
+- [x] Discoveries logged
 
 ---
 
@@ -97,6 +97,9 @@
 
 | Discovery | Disposition | Location |
 |-----------|-------------|----------|
+| `OrchestratorResult` still uses named `npmUpdate`/`composerUpdate` fields to avoid breaking `src/types/report.ts` and report generators (out of file scope) | Tech debt logged in CONTEXT.md; TODO comment added in orchestrator.ts | `src/phases/orchestrator.ts` |
+| `getScanSlice()` helper needed to bridge ecosystem string → `ScanResultJson.npm/.php` until TP-003 migrates to `ecosystems: Record<string, ...>` | Tech debt logged in CONTEXT.md | `src/phases/orchestrator.ts` |
+| Gate B/C agent-identity checks removed — agent string is now purely informational metadata | Tests updated to reflect new behavior | `src/gates/validator.ts`, `tests/unit/gates/validator.test.ts` |
 
 ---
 
