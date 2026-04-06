@@ -26,15 +26,17 @@ export function buildLocale(raw: RawLocale): Locale {
 
     exec: {
       ...raw.exec,
-      scan_before_summary: (total, phpLabel, npmLabel) => interp(raw.exec.scan_before_summary, { total, phpLabel, npmLabel }),
-      scan_after_summary: (total, phpLabel, npmLabel) => interp(raw.exec.scan_after_summary, { total, phpLabel, npmLabel }),
-      build_verified: (detail) => interp(raw.exec.build_verified, { detail }),
+      scan_summary: (total, ecoLabels) => interp(raw.exec.scan_summary, { total, ecoLabels }),
+      scan_after_summary_generic: (total, ecoLabels) => interp(raw.exec.scan_after_summary_generic, { total, ecoLabels }),
+      ecosystem_evidence_title: (ecoLabel) => interp(raw.exec.ecosystem_evidence_title, { ecoLabel }),
+      validation_verified: (validationLabel, detail) => interp(raw.exec.validation_verified, { validationLabel, detail }),
       fixed_version: (version) => interp(raw.exec.fixed_version, { version }),
     },
 
     consolidated: {
       ...raw.consolidated,
       title: (projectName) => interp(raw.consolidated.title, { projectName }),
+      ecosystem_header: (name) => interp(raw.consolidated.ecosystem_header, { name }),
     },
   };
 }

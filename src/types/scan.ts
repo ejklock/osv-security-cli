@@ -1,7 +1,7 @@
 import type { ExecutionEnv, PhaseStatus, VulnerabilityClass } from './common.js';
 
 export interface VulnerabilityEntry {
-  ecosystem: 'composer' | 'npm';
+  ecosystem: string;
   package: string;
   currentVersion: string;
   safeVersion: string | null;
@@ -28,7 +28,6 @@ export interface ScanResultJson {
   agent: 'osv-scanner';
   status: PhaseStatus;
   environment: ExecutionEnv;
-  php: EcosystemScanResult;
-  npm: EcosystemScanResult;
+  ecosystems: Record<string, EcosystemScanResult>;
   error: string | null;
 }

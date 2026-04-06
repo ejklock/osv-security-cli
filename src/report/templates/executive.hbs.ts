@@ -41,34 +41,23 @@ export default `\
 
 {{t.section_evidence_after}}
 
-{{#if hasPhpVulns}}
-{{t.composer_evidence_title}}
+{{#each evidenceSections}}
+{{#if hasVulns}}
+{{evidenceTitle}}
 
-{{t.table_after_header}}
-{{#each phpVulnsAfter}}| Composer | {{ghsaId}} | {{cvss}} | {{package}} | {{statusPt}} | {{risk}} |
+{{../t.table_after_header}}
+{{#each vulnsAfter}}| {{../reportLabel}} | {{ghsaId}} | {{cvss}} | {{package}} | {{statusPt}} | {{risk}} |
 {{/each}}
 {{/if}}
-{{#if hasNpmVulns}}
-{{t.npm_evidence_title}}
-
-{{t.table_after_header}}
-{{#each npmVulnsAfter}}| npm | {{ghsaId}} | {{cvss}} | {{package}} | {{statusPt}} | {{risk}} |
 {{/each}}
-{{/if}}
 {{scanAfterSummary}}
 
-{{#if showComposerTests}}
-{{t.tests_verified_intro}}
-
-\`\`\`
-{{composerTestsDetail}}
-\`\`\`
+{{#each evidenceSections}}
+{{#if showValidation}}
+{{validationVerified}}
 
 {{/if}}
-{{#if showNpmBuild}}
-{{buildVerified}}
-
-{{/if}}
+{{/each}}
 
 ---
 

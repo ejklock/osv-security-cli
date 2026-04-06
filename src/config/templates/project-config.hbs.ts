@@ -32,24 +32,17 @@ runtime:
 
 # Add packages that must not be auto-upgraded beyond their constraint.
 protected_packages:
-  {{#if hasPhp}}
-  composer:
+{{#each protectedPackageEcosystems}}
+  {{#if active}}
+  {{id}}:
     []
-    # - package: 'vendor/package'
-    #   constraint: '^2.0'
-    #   reason: 'Major upgrade requires project-wide migration'
+    # - package: '{{examplePackage}}'
+    #   constraint: '{{exampleConstraint}}'
+    #   reason: '{{exampleReason}}'
   {{else}}
-  composer: []
+  {{id}}: []
   {{/if}}
-  {{#if hasNpm}}
-  npm:
-    []
-    # - package: 'some-package'
-    #   constraint: '^3.0.0'
-    #   reason: 'v4 has breaking API changes'
-  {{else}}
-  npm: []
-  {{/if}}
+{{/each}}
 
 safe_update_policy:
   allow_patch_and_minor_within_constraints: true

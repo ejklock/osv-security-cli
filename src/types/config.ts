@@ -20,14 +20,6 @@ export interface RuntimeConfig {
   };
 }
 
-export function hasPhp(config: ProjectConfig): boolean {
-  return !!config.runtime.php;
-}
-
-export function hasNpm(config: ProjectConfig): boolean {
-  return !!config.runtime.node;
-}
-
 export interface CloudStorageConfig {
   provider: 'google_drive';
   folder_id: string;
@@ -50,6 +42,7 @@ export interface ProjectConfig {
   protected_packages: {
     composer: ProtectedPackage[];
     npm: ProtectedPackage[];
+    [key: string]: ProtectedPackage[];
   };
   safe_update_policy: SafeUpdatePolicy;
   conflict_resolution: string;

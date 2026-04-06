@@ -5,8 +5,8 @@ import ptBrRaw from './locales/pt-br.json';
 import enRaw from './locales/en.json';
 
 const locales: Record<SupportedLocale, Locale> = {
-  'pt-br': buildLocale(ptBrRaw as RawLocale),
-  en: buildLocale(enRaw as RawLocale),
+  'pt-br': buildLocale(ptBrRaw as unknown as RawLocale),
+  en: buildLocale(enRaw as unknown as RawLocale),
 };
 
 export function getLocale(code: SupportedLocale = 'pt-br'): Locale {

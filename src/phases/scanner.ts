@@ -1,13 +1,15 @@
 import type { CommandRunner } from '../types/common.js';
 import type { ProjectConfig } from '../types/config.js';
 import type { ScanResultJson, EcosystemScanResult, VulnerabilityEntry } from '../types/scan.js';
+import type { EcosystemRegistry } from '../ecosystem/registry.js';
 import { PhaseError, EnvironmentError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { buildScanCommand, OSV } from '../utils/osv-commands.js';
-import { hasPhp, hasNpm } from '../types/config.js';
 import { classifyPackage } from '../policy/safe-update.js';
+// defaultRegistry is imported here as a fallback; plugins are registered via ecosystem/index.ts
+import { defaultRegistry } from '../ecosystem/index.js';
 
-function emptyEcosystem(): EcosystemScanResult {
+export function emptyEcosystem(): EcosystemScanResult {
   return {
     vulnerabilities_total: 0,
     auto_safe: 0,
@@ -115,44 +117,50 @@ type OsvJsonOutput = {
 function parseOsvJsonOutput(
   stdout: string,
   config: ProjectConfig,
-): Pick<ScanResultJson, 'php' | 'npm'> {
+  registry: EcosystemRegistry,
+): Pick<ScanResultJson, 'ecosystems'> {
   const data = JSON.parse(stdout) as OsvJsonOutput;
-  const php = emptyEcosystem();
-  const npm = emptyEcosystem();
+  const ecosystems: Record<string, EcosystemScanResult> = {};
 
-  if (!data.results) return { php, npm };
+  if (!data.results) return { ecosystems };
 
-  // Pre-build Maps for O(1) protected-package lookup per vulnerability
-  const protectedComposer = new Map(
-    config.protected_packages.composer.map((p) => [p.package, p]),
+  // Pre-build protected package Maps per plugin for O(1) lookup
+  const protectedByPlugin = new Map(
+    registry.getAll().map((plugin) => [
+      plugin.id,
+      new Map(plugin.getProtectedPackages(config).map((p) => [p.package, p])),
+    ]),
   );
-  const protectedNpm = new Map(
-    config.protected_packages.npm.map((p) => [p.package, p]),
-  );
 
-  // Sets for O(1) dedup of package-ref strings instead of O(n) .includes()
-  const phpSets = {
-    auto_safe: new Set<string>(),
-    breaking: new Set<string>(),
-    manual: new Set<string>(),
-  };
-  const npmSets = {
-    auto_safe: new Set<string>(),
-    breaking: new Set<string>(),
-    manual: new Set<string>(),
-  };
+  // Sets for O(1) dedup of package-ref strings
+  const ecosystemSets: Record<
+    string,
+    { auto_safe: Set<string>; breaking: Set<string>; manual: Set<string> }
+  > = {};
 
   for (const result of data.results) {
     for (const pkg of result.packages ?? []) {
       const pkgName = pkg.package?.name ?? '';
       const pkgVersion = pkg.package?.version ?? '';
-      const ecosystem = pkg.package?.ecosystem?.toLowerCase() ?? '';
-      const isPhp = ecosystem === 'packagist' || ecosystem === 'composer';
-      const isNpm = ecosystem === 'npm';
-      const target = isPhp ? php : isNpm ? npm : null;
-      if (!target) continue;
+      const osvEcosystem = pkg.package?.ecosystem ?? '';
 
-      const targetSets = isPhp ? phpSets : npmSets;
+      // Resolve plugin via registry — replaces hardcoded isPhp/isNpm checks
+      const plugin = registry.findByOsvEcosystem(osvEcosystem);
+      if (!plugin) continue;
+
+      const pluginId = plugin.id;
+
+      if (!ecosystems[pluginId]) {
+        ecosystems[pluginId] = emptyEcosystem();
+        ecosystemSets[pluginId] = {
+          auto_safe: new Set<string>(),
+          breaking: new Set<string>(),
+          manual: new Set<string>(),
+        };
+      }
+      const target = ecosystems[pluginId]!;
+      const targetSets = ecosystemSets[pluginId]!;
+      const protectedMap = protectedByPlugin.get(pluginId) ?? new Map();
 
       for (const vuln of pkg.vulnerabilities ?? []) {
         const ghsaId = vuln.id ?? '';
@@ -162,11 +170,11 @@ function parseOsvJsonOutput(
 
         const classified = classifyPackage(
           { name: pkgName, currentVersion: pkgVersion, safeVersion },
-          isPhp ? protectedComposer : protectedNpm,
+          protectedMap,
         );
 
         const entry: VulnerabilityEntry = {
-          ecosystem: isPhp ? 'composer' : 'npm',
+          ecosystem: pluginId,
           package: pkgName,
           currentVersion: pkgVersion,
           safeVersion,
@@ -205,7 +213,7 @@ function parseOsvJsonOutput(
     }
   }
 
-  return { php, npm };
+  return { ecosystems };
 }
 
 async function assertOsvScannerAvailable(runner: CommandRunner, cwd: string): Promise<void> {
@@ -217,8 +225,14 @@ async function assertOsvScannerAvailable(runner: CommandRunner, cwd: string): Pr
   }
 }
 
-async function executeScan(runner: CommandRunner, config: ProjectConfig, cwd: string) {
-  const cmd = buildScanCommand(hasPhp(config), hasNpm(config));
+async function executeScan(
+  runner: CommandRunner,
+  config: ProjectConfig,
+  cwd: string,
+  registry: EcosystemRegistry,
+) {
+  const activePlugins = registry.getActive(config);
+  const cmd = buildScanCommand(activePlugins);
   logger.debug(`Running: ${cmd}`);
   return runner.run(cmd, { cwd });
 }
@@ -227,6 +241,7 @@ export async function runScanner(
   runner: CommandRunner,
   config: ProjectConfig,
   cwd: string,
+  registry: EcosystemRegistry = defaultRegistry,
 ): Promise<ScanResultJson> {
   logger.info('Phase 1: Running OSV vulnerability scan...');
 
@@ -235,8 +250,7 @@ export async function runScanner(
     agent: 'osv-scanner',
     status: 'success',
     environment: runner.environment,
-    php: emptyEcosystem(),
-    npm: emptyEcosystem(),
+    ecosystems: {},
     error: null,
   };
 
@@ -244,11 +258,12 @@ export async function runScanner(
     await assertOsvScannerAvailable(runner, cwd);
 
     if (runner.dryRun) {
-      logger.info(`[DRY-RUN] Would execute: ${buildScanCommand(hasPhp(config), hasNpm(config))}`);
+      const activePlugins = registry.getActive(config);
+      logger.info(`[DRY-RUN] Would execute: ${buildScanCommand(activePlugins)}`);
       return base;
     }
 
-    const scanResult = await executeScan(runner, config, cwd);
+    const scanResult = await executeScan(runner, config, cwd, registry);
 
     if (scanResult.exitCode !== 0 && !scanResult.stdout) {
       return {
@@ -258,7 +273,7 @@ export async function runScanner(
       };
     }
 
-    const parsed = parseOsvJsonOutput(scanResult.stdout, config);
+    const parsed = parseOsvJsonOutput(scanResult.stdout, config, registry);
     return { ...base, ...parsed };
   } catch (err) {
     if (err instanceof EnvironmentError) throw err;

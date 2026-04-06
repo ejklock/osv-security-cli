@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadConfig, DEFAULT_CONFIG_PATH } from "../src/config/loader.js";
@@ -22,6 +22,7 @@ import { prompt, promptConfirm, isInteractive } from "../src/utils/prompt.js";
 import { LocalStorageProvider } from "../src/storage/local.js";
 import { createStorageProvider } from "../src/storage/factory.js";
 import { runCloudSetup } from "../src/commands/cloud-setup.js";
+import { defaultRegistry } from "../src/ecosystem/index.js";
 import type { StorageProvider } from "../src/storage/provider.js";
 import type { ConsolidatedReport } from "../src/types/report.js";
 
@@ -51,6 +52,11 @@ const commonOptions = (cmd: Command) =>
     .option("-o, --output <path>", "Write report to file");
 
 // init command
+// NOTE: init/config scaffolding is intentionally product-scoped to php/npm.
+// The runtime scan → update → report architecture is fully registry-extensible
+// via EcosystemPlugin; new ecosystems added to the registry are picked up
+// automatically without touching this command or the orchestrator.
+// Update this command only when new ecosystems need first-class `init` UX.
 program
   .command("init")
   .description("Generate a project-config.yml template in the current project")
@@ -138,15 +144,31 @@ commonOptions(
 commonOptions(
   program
     .command("fix")
-    .description("Run full workflow: scan + npm fix + composer fix + executive report")
+    .description("Run full workflow: scan + ecosystem updates + executive report")
     .option(
       "--phases <phases>",
       "Comma-separated phases: scan,npm,composer,report",
       "scan,npm,composer",
     )
     .option("--no-report", "Skip executive report generation", false)
-    .option("--authorize-breaking-php", "Authorize breaking-change updates for PHP/Composer packages", false)
-    .option("--authorize-breaking-npm", "Authorize breaking-change updates for npm packages", false),
+    // Generic: --authorize-breaking can be passed multiple times, once per ecosystem id
+    .option(
+      "--authorize-breaking <ecosystemId...>",
+      "Authorize breaking-change updates for the given ecosystem id(s). Example: --authorize-breaking composer npm",
+    )
+    // Legacy aliases — kept for backward compatibility, hidden from help
+    .addOption(
+      new Option(
+        "--authorize-breaking-php",
+        "Authorize breaking-change updates for PHP/Composer (alias for --authorize-breaking composer)",
+      ).hideHelp(),
+    )
+    .addOption(
+      new Option(
+        "--authorize-breaking-npm",
+        "Authorize breaking-change updates for npm (alias for --authorize-breaking npm)",
+      ).hideHelp(),
+    ),
 ).action(async (opts) => {
   await runCommand("fix", opts);
 });
@@ -222,7 +244,20 @@ async function runCommand(
     client?: string;
     project?: string;
     noReport?: boolean;
+    /**
+     * Generic: ecosystem ids to authorize breaking changes for.
+     * Populated by --authorize-breaking <id...>
+     */
+    authorizeBreaking?: string[];
+    /**
+     * Legacy hidden aliases — translated to authorizeBreaking entries.
+     * @deprecated Use --authorize-breaking composer instead.
+     */
     authorizeBreakingPhp?: boolean;
+    /**
+     * Legacy hidden aliases — translated to authorizeBreaking entries.
+     * @deprecated Use --authorize-breaking npm instead.
+     */
     authorizeBreakingNpm?: boolean;
   },
 ): Promise<void> {
@@ -248,7 +283,7 @@ async function runCommand(
         : formatScanSummary(scanResult);
       await writeOutput(output, opts.output);
       if (scanResult.status === "error") exitCode = 2;
-      else if (scanResult.php.breaking > 0 || scanResult.npm.breaking > 0)
+      else if (Object.values(scanResult.ecosystems).some((e) => e.breaking > 0))
         exitCode = 1;
     } else if (command === "fix") {
       const phases = opts.phases
@@ -257,19 +292,33 @@ async function runCommand(
 
       const scanBefore = await runScanner(runner, config, opts.cwd);
 
-      // Resolve breaking-change authorization: flag → prompt → deny
-      let authorizeBreakingPhp = opts.authorizeBreakingPhp ?? false;
-      let authorizeBreakingNpm = opts.authorizeBreakingNpm ?? false;
+      // Build authorizeBreaking record:
+      // 1. Start from the generic --authorize-breaking <id...> list
+      // 2. Merge legacy aliases (--authorize-breaking-php → composer, --authorize-breaking-npm → npm)
+      const authorizedIds = new Set<string>(opts.authorizeBreaking ?? []);
+      if (opts.authorizeBreakingPhp) authorizedIds.add('composer');
+      if (opts.authorizeBreakingNpm) authorizedIds.add('npm');
 
-      if (!authorizeBreakingPhp && scanBefore.php.breaking > 0 && isInteractive() && !opts.dryRun) {
-        const pkgs = scanBefore.php.breaking_packages.join(', ');
-        process.stdout.write(`\nPHP breaking-change packages found: ${pkgs}\n`);
-        authorizeBreakingPhp = await promptConfirm('Authorize breaking-change updates for PHP/Composer?');
+      // Interactive: iterate registry plugins that are active and have breaking vulns
+      if (!opts.dryRun && isInteractive()) {
+        const activePlugins = defaultRegistry.getActive(config);
+        for (const plugin of activePlugins) {
+          const breaking = scanBefore.ecosystems[plugin.id]?.breaking ?? 0;
+          if (breaking > 0 && !authorizedIds.has(plugin.id)) {
+            const pkgs = (scanBefore.ecosystems[plugin.id]?.breaking_packages ?? []).join(', ');
+            process.stdout.write(`\n${plugin.name} breaking-change packages found: ${pkgs}\n`);
+            const confirmed = await promptConfirm(
+              `Authorize breaking-change updates for ${plugin.name}?`,
+            );
+            if (confirmed) authorizedIds.add(plugin.id);
+          }
+        }
       }
-      if (!authorizeBreakingNpm && scanBefore.npm.breaking > 0 && isInteractive() && !opts.dryRun) {
-        const pkgs = scanBefore.npm.breaking_packages.join(', ');
-        process.stdout.write(`\nnpm breaking-change packages found: ${pkgs}\n`);
-        authorizeBreakingNpm = await promptConfirm('Authorize breaking-change updates for npm?');
+
+      // Translate to authorizeBreaking record for orchestrator
+      const authorizeBreakingRecord: Record<string, boolean> = {};
+      for (const plugin of defaultRegistry.getAll()) {
+        authorizeBreakingRecord[plugin.id] = authorizedIds.has(plugin.id);
       }
 
       const result = await runOrchestrator(runner, config, {
@@ -278,8 +327,7 @@ async function runCommand(
         dryRun: opts.dryRun,
         verbose: opts.verbose,
         phases,
-        authorizeBreakingPhp,
-        authorizeBreakingNpm,
+        authorizeBreaking: authorizeBreakingRecord,
       });
 
       if (result.scan) {
@@ -288,8 +336,7 @@ async function runCommand(
           date: new Date().toISOString().split("T")[0]!,
           environment: runner.environment,
           scan: result.scan,
-          npmUpdate: result.npmUpdate,
-          composerUpdate: result.composerUpdate,
+          updates: result.updates,
           overallStatus: result.overallStatus,
         };
 
@@ -306,8 +353,7 @@ async function runCommand(
           project: config.project.name,
           scanBefore,
           scanAfter,
-          npmUpdate: result.npmUpdate,
-          composerUpdate: result.composerUpdate,
+          updates: result.updates,
         });
         const filename = executiveReportFilename(config.project.client, config.project.name);
         const reportsDir = resolve(opts.cwd, config.reports_dir ?? ".osv-scanner/reports");
@@ -335,8 +381,7 @@ async function runCommand(
         project,
         scanBefore,
         scanAfter,
-        npmUpdate: orchestratorResult.npmUpdate,
-        composerUpdate: orchestratorResult.composerUpdate,
+        updates: orchestratorResult.updates,
       });
 
       const filename = executiveReportFilename(client, project);
@@ -372,21 +417,21 @@ function formatScanSummary(
     `## OSV Scan Report — ${new Date().toISOString().split("T")[0]}`,
     `**Environment:** ${scan.environment}`,
     "",
-    "### PHP (composer.lock)",
-    `- Total: ${scan.php.vulnerabilities_total}`,
-    `- Auto-safe: ${scan.php.auto_safe}`,
-    `- Breaking: ${scan.php.breaking}`,
-    `- Manual: ${scan.php.manual}`,
-    "",
-    "### npm (package-lock.json)",
-    `- Total: ${scan.npm.vulnerabilities_total}`,
-    `- Auto-safe: ${scan.npm.auto_safe}`,
-    `- Breaking: ${scan.npm.breaking}`,
-    `- Manual: ${scan.npm.manual}`,
   ];
 
+  for (const [id, eco] of Object.entries(scan.ecosystems)) {
+    lines.push(
+      `### ${id}`,
+      `- Total: ${eco.vulnerabilities_total}`,
+      `- Auto-safe: ${eco.auto_safe}`,
+      `- Breaking: ${eco.breaking}`,
+      `- Manual: ${eco.manual}`,
+      "",
+    );
+  }
+
   if (scan.error) {
-    lines.push("", `**Warning:** ${scan.error}`);
+    lines.push(`**Warning:** ${scan.error}`);
   }
 
   return lines.join("\n");

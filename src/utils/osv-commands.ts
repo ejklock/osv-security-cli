@@ -1,13 +1,14 @@
+import type { EcosystemPlugin } from '../ecosystem/types.js';
+
 export const OSV = {
-  scanPhp: 'osv-scanner --lockfile composer.lock --format json',
-  scanNpm: 'osv-scanner --lockfile package-lock.json --format json',
-  fixNpm: 'osv-scanner fix --strategy=in-place -L package-lock.json',
   checkAvailable: 'osv-scanner --version',
 } as const;
 
-export function buildScanCommand(php: boolean, npm: boolean): string {
-  const lockfiles: string[] = [];
-  if (php) lockfiles.push('--lockfile composer.lock');
-  if (npm) lockfiles.push('--lockfile package-lock.json');
-  return `osv-scanner ${lockfiles.join(' ')} --format json`;
+/**
+ * Builds the osv-scanner scan command from an array of active plugins.
+ * Each plugin contributes its own lockfile args via buildScanArgs().
+ */
+export function buildScanCommand(activePlugins: EcosystemPlugin[]): string {
+  const args = activePlugins.flatMap((p) => p.buildScanArgs());
+  return `osv-scanner ${args.join(' ')} --format json`;
 }

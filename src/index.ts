@@ -3,7 +3,7 @@ export { generateConfigYaml } from './config/generator.js';
 export { runOrchestrator } from './phases/orchestrator.js';
 export { generateConsolidatedReport } from './report/consolidated.js';
 export { generateExecutiveReport, executiveReportFilename } from './report/executive.js';
-export { validateGateA, validateGateB, validateGateC } from './gates/validator.js';
+export { validateGateA, validateEcosystemGate } from './gates/validator.js';
 export { LocalExecutor } from './executor/local-executor.js';
 export { DockerExecutor } from './executor/docker-executor.js';
 export { detectEnvironment } from './environment/detector.js';

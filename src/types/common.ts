@@ -1,4 +1,4 @@
-export type Ecosystem = 'php' | 'npm';
+export type Ecosystem = string; // Maintains the alias; plugins define their own IDs
 export type ExecutionEnv = 'docker' | 'local';
 export type PhaseStatus = 'success' | 'error' | 'skipped';
 export type VulnerabilityClass = 'auto_safe' | 'breaking' | 'manual';
@@ -26,6 +26,6 @@ export interface CommandRunner {
 
 export interface GateResult {
   valid: boolean;
-  gate: 'A' | 'B' | 'C';
+  gate: string;
   errors: string[];
 }

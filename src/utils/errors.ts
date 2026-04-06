@@ -26,7 +26,8 @@ export class PhaseError extends Error {
 export class GateValidationError extends Error {
   constructor(
     message: string,
-    public readonly gate: 'A' | 'B' | 'C',
+    /** Gate identifier: 'A' for scan gate, or a plugin id (e.g. 'npm', 'composer') for update gates */
+    public readonly gate: string,
     public readonly errors: string[],
   ) {
     super(message);

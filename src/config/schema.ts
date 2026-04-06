@@ -42,9 +42,9 @@ export const ProjectConfigSchema = z.object({
   }),
   runtime: RuntimeConfigSchema,
   protected_packages: z.object({
-    composer: z.array(ProtectedPackageSchema),
-    npm: z.array(ProtectedPackageSchema),
-  }),
+    composer: z.array(ProtectedPackageSchema).optional().default([]),
+    npm: z.array(ProtectedPackageSchema).optional().default([]),
+  }).catchall(z.array(ProtectedPackageSchema)),
   safe_update_policy: SafeUpdatePolicySchema,
   conflict_resolution: z.string(),
   reports_dir: z.string().optional(),

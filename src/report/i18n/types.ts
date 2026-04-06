@@ -15,14 +15,17 @@ export interface ExecLocale {
   table_pending_header: string;
   section_evidence_before: string;
   table_before_header: string;
-  scan_before_summary(total: number, phpLabel: string, npmLabel: string): string;
+  /** Generic scan summary: total vulns + per-ecosystem labels */
+  scan_summary(total: number, ecoLabels: string): string;
   section_evidence_after: string;
-  composer_evidence_title: string;
-  npm_evidence_title: string;
+  /** Generic evidence section title per ecosystem. Ex: "PHP/Composer (composer.lock) — post-fix scan summary:" */
+  ecosystem_evidence_title(ecoLabel: string): string;
   table_after_header: string;
-  scan_after_summary(total: number, phpLabel: string, npmLabel: string): string;
+  /** Generic post-fix summary: remaining vulns + per-ecosystem labels */
+  scan_after_summary_generic(total: number, ecoLabels: string): string;
   tests_verified_intro: string;
-  build_verified(detail: string): string;
+  /** Generic validation verified message for any ecosystem */
+  validation_verified(validationLabel: string, detail: string): string;
   section_summary: string;
   all_fixed: string;
   pending_needs_action_intro: string;
@@ -37,12 +40,9 @@ export interface ConsolidatedLocale {
   section_vulns: string;
   label_total: string;
   section_fixes: string;
-  npm_header: string;
-  composer_header: string;
+  ecosystem_header(name: string): string;
   no_packages_updated: string;
   section_validation: string;
-  php_tests_label: string;
-  npm_build_label: string;
   section_pending: string;
   breaking_title: string;
   breaking_authorize: string;

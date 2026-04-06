@@ -31,14 +31,17 @@ export interface RawLocale {
     table_pending_header: string;
     section_evidence_before: string;
     table_before_header: string;
-    scan_before_summary: string;  // vars: total, phpLabel, npmLabel
+    /** vars: total, ecoLabels */
+    scan_summary: string;
     section_evidence_after: string;
-    composer_evidence_title: string;
-    npm_evidence_title: string;
+    /** vars: ecoLabel — e.g. "PHP/Composer (composer.lock) — post-fix scan summary:" */
+    ecosystem_evidence_title: string;
     table_after_header: string;
-    scan_after_summary: string;   // vars: total, phpLabel, npmLabel
+    /** vars: total, ecoLabels */
+    scan_after_summary_generic: string;
     tests_verified_intro: string;
-    build_verified: string;       // vars: detail
+    /** vars: validationLabel, detail */
+    validation_verified: string;
     section_summary: string;
     all_fixed: string;
     pending_needs_action_intro: string;
@@ -53,12 +56,10 @@ export interface RawLocale {
     section_vulns: string;
     label_total: string;
     section_fixes: string;
-    npm_header: string;
-    composer_header: string;
+    /** vars: name — ecosystem name, e.g. "npm", "Composer" */
+    ecosystem_header: string;
     no_packages_updated: string;
     section_validation: string;
-    php_tests_label: string;
-    npm_build_label: string;
     section_pending: string;
     breaking_title: string;
     breaking_authorize: string;

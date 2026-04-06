@@ -1,0 +1,245 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { CommandRunner, CommandResult } from '../../../src/types/common.js';
+import type { ProjectConfig } from '../../../src/types/config.js';
+import type { ScanResultJson } from '../../../src/types/scan.js';
+
+// ── Module-level mocks ───────────────────────────────────────────────────────
+vi.mock('../../../src/utils/git.js', () => ({
+  backupFiles: vi.fn().mockResolvedValue(new Map()),
+  restoreFiles: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../src/utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock('../../../src/phases/scanner.js', () => ({
+  emptyEcosystem: vi.fn(() => ({
+    vulnerabilities_total: 0,
+    auto_safe: 0,
+    breaking: 0,
+    manual: 0,
+    auto_safe_packages: [],
+    breaking_packages: [],
+    manual_packages: [],
+    vulnerabilities: [],
+  })),
+}));
+
+import { runComposerUpdater } from '../../../src/ecosystem/plugins/composer-updater.js';
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function makeRunner(overrides: { dryRun?: boolean; run?: ReturnType<typeof vi.fn> } = {}): CommandRunner {
+  const { dryRun = false, run } = overrides;
+  return {
+    run: run ?? vi.fn().mockResolvedValue(ok()),
+    dryRun,
+    environment: 'local',
+  } as unknown as CommandRunner;
+}
+
+function ok(stdout = '', stderr = ''): CommandResult {
+  return { stdout, stderr, exitCode: 0, command: '', dryRun: false };
+}
+
+function fail(stderr = 'composer update failed'): CommandResult {
+  return { stdout: '', stderr, exitCode: 1, command: '', dryRun: false };
+}
+
+function baseConfig(overrides: Partial<ProjectConfig['runtime']> = {}): ProjectConfig {
+  return {
+    project: { name: 'test-project', client: 'test-client' },
+    runtime: {
+      execution: 'local',
+      docker_service: '',
+      ...overrides,
+    },
+    protected_packages: { composer: [], npm: [] },
+    safe_update_policy: {
+      allow_patch_and_minor_within_constraints: true,
+      require_authorization_for_constraint_change: false,
+      authorization_format: '',
+    },
+    conflict_resolution: 'fail',
+  };
+}
+
+/** Build a ScanResultJson with composer ecosystem containing packages to update */
+function baseScan(composerAutoSafe: string[] = ['vendor/safe-pkg@1.2.3']): ScanResultJson {
+  return {
+    $schema: 'osv-scan-result/v1',
+    agent: 'osv-scanner',
+    status: 'success',
+    environment: 'local',
+    ecosystems: {
+      composer: {
+        vulnerabilities_total: 1,
+        auto_safe: 1,
+        breaking: 0,
+        manual: 0,
+        auto_safe_packages: composerAutoSafe,
+        breaking_packages: [],
+        manual_packages: [],
+        vulnerabilities: [],
+      },
+    },
+    error: null,
+  };
+}
+
+/** Scan result with NO packages to update (empty auto_safe and breaking) */
+function emptyScan(): ScanResultJson {
+  return {
+    $schema: 'osv-scan-result/v1',
+    agent: 'osv-scanner',
+    status: 'success',
+    environment: 'local',
+    ecosystems: {
+      composer: {
+        vulnerabilities_total: 0,
+        auto_safe: 0,
+        breaking: 0,
+        manual: 0,
+        auto_safe_packages: [],
+        breaking_packages: [],
+        manual_packages: [],
+        vulnerabilities: [],
+      },
+    },
+    error: null,
+  };
+}
+
+// ── Dry-run tests ────────────────────────────────────────────────────────────
+
+describe('runComposerUpdater — dry-run paths', () => {
+  it('dry-run WITH test_command => validation status is "skipped" and detail is "Dry-run — not executed"', async () => {
+    const runner = makeRunner({ dryRun: true });
+    const config = baseConfig({ test_command: 'php artisan test' });
+
+    const result = await runComposerUpdater(runner, config, baseScan(), '/tmp/project');
+
+    expect(result.validations).toHaveLength(1);
+    expect(result.validations[0].status).toBe('skipped');
+    expect(result.validations[0].detail).toBe('Dry-run — not executed');
+    // In dry-run mode no commands should be executed
+    expect(runner.run).not.toHaveBeenCalled();
+  });
+
+  it('dry-run WITHOUT test_command => validation status is "skipped" and detail explains no test_command configured', async () => {
+    const runner = makeRunner({ dryRun: true });
+    const config = baseConfig(); // no test_command
+
+    const result = await runComposerUpdater(runner, config, baseScan(), '/tmp/project');
+
+    expect(result.validations).toHaveLength(1);
+    expect(result.validations[0].status).toBe('skipped');
+    expect(result.validations[0].detail).toMatch(/no test_command configured/i);
+    expect(runner.run).not.toHaveBeenCalled();
+  });
+
+  it('dry-run always returns status "success"', async () => {
+    const runner = makeRunner({ dryRun: true });
+    const config = baseConfig({ test_command: 'vendor/bin/phpunit' });
+
+    const result = await runComposerUpdater(runner, config, baseScan(), '/tmp/project');
+
+    expect(result.status).toBe('success');
+    expect(result.$schema).toBe('osv-update-result/v1');
+    expect(result.agent).toBe('composer-safe-update');
+  });
+
+  it('dry-run packages_updated reflects auto_safe_packages from scan', async () => {
+    const runner = makeRunner({ dryRun: true });
+    const config = baseConfig({ test_command: 'vendor/bin/phpunit' });
+    const scan = baseScan(['vendor/safe-pkg@1.2.3']);
+
+    const result = await runComposerUpdater(runner, config, scan, '/tmp/project');
+
+    expect(result.packages_updated).toEqual(['vendor/safe-pkg@1.2.3']);
+  });
+});
+
+// ── No packages to update ────────────────────────────────────────────────────
+
+describe('runComposerUpdater — no packages to update', () => {
+  it('returns immediately with a skipped validation when packageNamesToUpdate is empty', async () => {
+    const runner = makeRunner();
+    const config = baseConfig();
+
+    const result = await runComposerUpdater(runner, config, emptyScan(), '/tmp/project');
+
+    expect(result.validations).toHaveLength(1);
+    expect(result.validations[0].status).toBe('skipped');
+    expect(result.validations[0].detail).toMatch(/no packages to update/i);
+    // No commands should have been run
+    expect(runner.run).not.toHaveBeenCalled();
+  });
+
+  it('no-packages path returns status "success"', async () => {
+    const runner = makeRunner();
+    const config = baseConfig();
+
+    const result = await runComposerUpdater(runner, config, emptyScan(), '/tmp/project');
+
+    expect(result.status).toBe('success');
+    expect(result.error).toBeNull();
+  });
+});
+
+// ── Update failure path ──────────────────────────────────────────────────────
+
+describe('runComposerUpdater — update failure path', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('composer update failure => status is "error" and error message contains stderr', async () => {
+    // Sequence: composer outdated (ok), composer update (FAIL)
+    const runMock = vi.fn()
+      .mockResolvedValueOnce(ok()) // composer outdated --direct
+      .mockResolvedValueOnce(fail('Your requirements could not be resolved'));
+
+    const runner = makeRunner({ run: runMock });
+    const config = baseConfig();
+
+    const result = await runComposerUpdater(runner, config, baseScan(), '/tmp/project');
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('composer update failed');
+    expect(result.error).toContain('Your requirements could not be resolved');
+  });
+
+  it('composer update failure => validation is not empty and has meaningful detail', async () => {
+    const runMock = vi.fn()
+      .mockResolvedValueOnce(ok()) // composer outdated --direct
+      .mockResolvedValueOnce(fail('conflict detected'));
+
+    const runner = makeRunner({ run: runMock });
+    const config = baseConfig();
+
+    const result = await runComposerUpdater(runner, config, baseScan(), '/tmp/project');
+
+    expect(result.validations).toHaveLength(1);
+    const v = result.validations[0];
+    // detail must not be empty — it should explain what happened
+    expect(v.detail).toBeTruthy();
+    expect(v.detail!.length).toBeGreaterThan(0);
+    // In the update failure path, tests could not run, so status reflects that
+    expect(['skipped', 'fail']).toContain(v.status);
+  });
+
+  it('composer update failure => validation name is "tests"', async () => {
+    const runMock = vi.fn()
+      .mockResolvedValueOnce(ok()) // composer outdated --direct
+      .mockResolvedValueOnce(fail('version conflict'));
+
+    const runner = makeRunner({ run: runMock });
+    const config = baseConfig();
+
+    const result = await runComposerUpdater(runner, config, baseScan(), '/tmp/project');
+
+    expect(result.validations[0].name).toBe('tests');
+  });
+});

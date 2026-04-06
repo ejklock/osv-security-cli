@@ -5,40 +5,31 @@ export default `\
 
 ## {{t.section_vulns}}
 - **{{t.label_total}}:** {{totalVulns}}
-- **PHP (auto-safe/breaking/manual):** {{php.auto_safe}}/{{php.breaking}}/{{php.manual}}
-- **npm (auto-safe/breaking/manual):** {{npm.auto_safe}}/{{npm.breaking}}/{{npm.manual}}
+{{#each ecosystemSections}}- **{{reportLabel}} (auto-safe/breaking/manual):** {{eco.auto_safe}}/{{eco.breaking}}/{{eco.manual}}
+{{/each}}
 
 ## {{t.section_fixes}}
 
-{{t.npm_header}}
-{{#if npmUpdated}}
-{{#each npmUpdated}}- {{this}}
+{{#each ecosystemSections}}
+{{ecosystemHeader}}
+{{#if updatedPackages}}
+{{#each updatedPackages}}- {{this}}
 {{/each}}
 {{else}}
-- {{t.no_packages_updated}}
+- {{../t.no_packages_updated}}
 {{/if}}
 
-{{t.composer_header}}
-{{#if composerUpdated}}
-{{#each composerUpdated}}- {{this}}
 {{/each}}
-{{else}}
-- {{t.no_packages_updated}}
-{{/if}}
 
 ## {{t.section_validation}}
-{{#if composerUpdate}}
-- {{t.php_tests_label}}: {{composerTestStatus}}
-{{#if composerUpdate.tests_detail}}
-  {{composerUpdate.tests_detail}}
+{{#each ecosystemSections}}
+{{#if update}}
+- {{validationLabel}}: {{validationStatus}}
+{{#if validationDetail}}
+  {{validationDetail}}
 {{/if}}
 {{/if}}
-{{#if npmUpdate}}
-- {{t.npm_build_label}}: {{npmBuildStatus}}
-{{#if npmUpdate.build_detail}}
-  {{npmUpdate.build_detail}}
-{{/if}}
-{{/if}}
+{{/each}}
 
 {{#if pendingItems}}
 ## {{t.section_pending}}

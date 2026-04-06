@@ -1,6 +1,7 @@
 import type { ExecutiveReportOptions } from '../types/report.js';
 import type { VulnerabilityEntry } from '../types/scan.js';
 import type { Locale } from './i18n/index.js';
+import { defaultRegistry } from '../ecosystem/index.js';
 import { getLocale } from './i18n/index.js';
 import { render } from './renderer.js';
 import executiveTemplate from './templates/executive.hbs.js';
@@ -13,10 +14,6 @@ function monthName(date: Date): string {
 
 function ghsaLink(id: string): string {
   return id ? `[${id}](https://osv.dev/${id})` : '—';
-}
-
-function ecoLabel(ecosystem: 'composer' | 'npm'): string {
-  return ecosystem === 'composer' ? 'Composer' : 'npm';
 }
 
 function parsePackageName(ref: string): string {
@@ -59,87 +56,131 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
   const locale = getLocale(opts.locale);
   const now = new Date();
 
-  const composerUpdated = opts.composerUpdate?.packages_updated ?? [];
-  const npmUpdated = opts.npmUpdate?.packages_updated ?? [];
-  const composerUpdatedNames = new Set(composerUpdated.map(parsePackageName));
-  const npmUpdatedNames = new Set(npmUpdated.map(parsePackageName));
+  // Build per-ecosystem update name sets (for determining fixed vs pending)
+  const plugins = defaultRegistry.getAll();
+
+  // Map: ecosystemId -> Set of updated package names
+  const updatedNamesByEco = new Map<string, Set<string>>();
+  for (const plugin of plugins) {
+    const update = opts.updates[plugin.id] ?? null;
+    const updatedPackages = update?.packages_updated ?? [];
+    updatedNamesByEco.set(plugin.id, new Set(updatedPackages.map(parsePackageName)));
+  }
 
   const allVulnsBefore = [
-    ...opts.scanBefore.php.vulnerabilities,
-    ...opts.scanBefore.npm.vulnerabilities,
+    ...Object.values(opts.scanBefore.ecosystems).flatMap((e) => e.vulnerabilities),
   ];
 
+  // Fixed vulns: auto_safe and in the updated set for their ecosystem
   const fixedVulns = allVulnsBefore
     .filter((v) => {
-      const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
+      const names = updatedNamesByEco.get(v.ecosystem) ?? new Set();
       return v.classification === 'auto_safe' && names.has(v.package);
     })
-    .map((v) => ({
-      ecoLabel: ecoLabel(v.ecosystem),
+    .map((v) => {
+      // Look up reportLabel from registry
+      const plugin = defaultRegistry.findByOsvEcosystem(v.ecosystem) ?? defaultRegistry.get(v.ecosystem);
+      return {
+        ecoLabel: plugin?.reportLabel ?? v.ecosystem,
+        ghsaLink: ghsaLink(v.ghsaId),
+        cvss: v.cvss,
+        package: v.package,
+        currentVersion: v.currentVersion,
+        safeVersion: v.safeVersion ?? '—',
+        risk: v.risk,
+      };
+    });
+
+  const pendingOriginal = allVulnsBefore.filter((v) => {
+    if (v.classification !== 'auto_safe') return true;
+    const names = updatedNamesByEco.get(v.ecosystem) ?? new Set();
+    return !names.has(v.package);
+  });
+
+  const pendingVulns = pendingOriginal.map((v) => {
+    const plugin = defaultRegistry.findByOsvEcosystem(v.ecosystem) ?? defaultRegistry.get(v.ecosystem);
+    return {
+      ecoLabel: plugin?.reportLabel ?? v.ecosystem,
       ghsaLink: ghsaLink(v.ghsaId),
       cvss: v.cvss,
       package: v.package,
       currentVersion: v.currentVersion,
-      safeVersion: v.safeVersion ?? '—',
-      risk: v.risk,
-    }));
-
-  const pendingOriginal = allVulnsBefore.filter((v) => {
-    if (v.classification !== 'auto_safe') return true;
-    const names = v.ecosystem === 'composer' ? composerUpdatedNames : npmUpdatedNames;
-    return !names.has(v.package);
-  });
-
-  const pendingVulns = pendingOriginal.map((v) => ({
-    ecoLabel: ecoLabel(v.ecosystem),
-    ghsaLink: ghsaLink(v.ghsaId),
-    cvss: v.cvss,
-    package: v.package,
-    currentVersion: v.currentVersion,
-    motivoPt: motivoStr(v, locale),
-  }));
-
-  const totalBefore = opts.scanBefore.php.vulnerabilities_total + opts.scanBefore.npm.vulnerabilities_total;
-  const phpPkgsBefore = uniqueCount(opts.scanBefore.php.vulnerabilities);
-  const npmPkgsBefore = uniqueCount(opts.scanBefore.npm.vulnerabilities);
-
-  const phpVulnsAfter = opts.scanBefore.php.vulnerabilities.map((v) => {
-    const fixed = composerUpdatedNames.has(v.package) && v.classification === 'auto_safe';
-    return {
-      ghsaId: v.ghsaId,
-      cvss: v.cvss,
-      package: v.package,
-      statusPt: fixed ? locale.exec.fixed_version(v.safeVersion ?? '—') : pendingStatus(v, locale),
-      risk: v.risk,
+      motivoPt: motivoStr(v, locale),
     };
   });
 
-  const npmVulnsAfter = opts.scanBefore.npm.vulnerabilities.map((v) => {
-    const fixed = npmUpdatedNames.has(v.package) && v.classification === 'auto_safe';
+  // Per-plugin evidence sections
+  const evidenceSections = plugins.map((plugin) => {
+    const ecoScan = opts.scanBefore.ecosystems[plugin.id];
+    const update = opts.updates[plugin.id] ?? null;
+    const updatedNames = updatedNamesByEco.get(plugin.id) ?? new Set();
+
+    const vulnsAfter = (ecoScan?.vulnerabilities ?? []).map((v) => {
+      const fixed = updatedNames.has(v.package) && v.classification === 'auto_safe';
+      return {
+        ghsaId: v.ghsaId,
+        cvss: v.cvss,
+        package: v.package,
+        statusPt: fixed ? locale.exec.fixed_version(v.safeVersion ?? '—') : pendingStatus(v, locale),
+        risk: v.risk,
+      };
+    });
+
+    const hasVulns = vulnsAfter.length > 0;
+
+    // Resolve validation status and detail from the canonical validations[] array
+    const validationEntry = update?.validations?.find((v) => v.name === plugin.validationName);
+    const validationStatus = validationEntry?.status;
+    const validationDetail = validationEntry?.detail ?? '';
+    const showValidation = validationStatus === 'pass' && !!validationDetail;
+    const validationVerified = showValidation
+      ? locale.exec.validation_verified(plugin.validationLabel, validationDetail)
+      : '';
+
     return {
-      ghsaId: v.ghsaId,
-      cvss: v.cvss,
-      package: v.package,
-      statusPt: fixed ? locale.exec.fixed_version(v.safeVersion ?? '—') : pendingStatus(v, locale),
-      risk: v.risk,
+      id: plugin.id,
+      name: plugin.name,
+      reportLabel: plugin.reportLabel,
+      evidenceTitle: locale.exec.ecosystem_evidence_title(plugin.reportLabel),
+      hasVulns,
+      vulnsAfter,
+      showValidation,
+      validationDetail,
+      validationVerified,
     };
   });
 
-  const phpPendingOrig = pendingOriginal.filter((v) => v.ecosystem === 'composer');
-  const npmPendingOrig = pendingOriginal.filter((v) => v.ecosystem === 'npm');
-  const phpPkgsAfter = uniqueCount(phpPendingOrig);
-  const npmPkgsAfter = uniqueCount(npmPendingOrig);
+  // Summary: per-ecosystem before/after labels
+  const ecoBeforeLabels = plugins
+    .map((plugin) => {
+      const eco = opts.scanBefore.ecosystems[plugin.id];
+      const total = eco?.vulnerabilities_total ?? 0;
+      const pkgCount = uniqueCount(eco?.vulnerabilities ?? []);
+      return locale.pkg_count(total, pkgCount, plugin.reportLabel);
+    })
+    .join(', ');
 
-  const phpBeforeLabel = locale.pkg_count(opts.scanBefore.php.vulnerabilities_total, phpPkgsBefore, 'PHP/Composer');
-  const npmBeforeLabel = locale.pkg_count(opts.scanBefore.npm.vulnerabilities_total, npmPkgsBefore, 'npm');
+  const pendingByEco = new Map<string, VulnerabilityEntry[]>();
+  for (const v of pendingOriginal) {
+    const arr = pendingByEco.get(v.ecosystem) ?? [];
+    arr.push(v);
+    pendingByEco.set(v.ecosystem, arr);
+  }
 
-  const phpAfterNames = phpPkgsAfter === 1
-    ? [...new Set(phpPendingOrig.map((v) => v.package))].join(', ')
-    : undefined;
-  const phpAfterLabel = locale.pkg_count(phpPendingOrig.length, phpPkgsAfter, 'PHP/Composer', phpAfterNames);
-  const npmAfterLabel = locale.pkg_count(npmPendingOrig.length, npmPkgsAfter, 'npm');
+  const ecoAfterLabels = plugins
+    .map((plugin) => {
+      const pending = pendingByEco.get(plugin.id) ?? [];
+      const pkgCount = uniqueCount(pending);
+      const pkgAfterNames = pkgCount === 1
+        ? [...new Set(pending.map((v) => v.package))].join(', ')
+        : undefined;
+      return locale.pkg_count(pending.length, pkgCount, plugin.reportLabel, pkgAfterNames);
+    })
+    .join(', ');
 
-  // pendingByPkg for Resumo/Summary section
+  const totalBefore = allVulnsBefore.length;
+
+  // pendingByPkg for Summary section
   const pendingByPkgMap = new Map<string, VulnerabilityEntry[]>();
   for (const v of pendingOriginal) {
     const key = `${v.ecosystem}:${v.package}`;
@@ -164,9 +205,6 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
     };
   });
 
-  const composerTests = opts.composerUpdate?.tests;
-  const npmBuildStatus = opts.npmUpdate?.build_status;
-
   const context: Record<string, unknown> = {
     t: locale.exec,
     client: opts.client,
@@ -176,25 +214,21 @@ export function generateExecutiveReport(opts: ExecutiveReportOptions): string {
     noVulns: totalBefore === 0,
     fixedVulns,
     pendingVulns,
-    allVulnsBefore: allVulnsBefore.map((v) => ({
-      ecoLabel: ecoLabel(v.ecosystem),
-      ghsaId: v.ghsaId,
-      cvss: v.cvss,
-      package: v.package,
-      currentVersion: v.currentVersion,
-      risk: v.risk,
-    })),
+    allVulnsBefore: allVulnsBefore.map((v) => {
+      const plugin = defaultRegistry.findByOsvEcosystem(v.ecosystem) ?? defaultRegistry.get(v.ecosystem);
+      return {
+        ecoLabel: plugin?.reportLabel ?? v.ecosystem,
+        ghsaId: v.ghsaId,
+        cvss: v.cvss,
+        package: v.package,
+        currentVersion: v.currentVersion,
+        risk: v.risk,
+      };
+    }),
     totalBefore,
-    scanBeforeSummary: locale.exec.scan_before_summary(totalBefore, phpBeforeLabel, npmBeforeLabel),
-    hasPhpVulns: phpVulnsAfter.length > 0,
-    phpVulnsAfter,
-    hasNpmVulns: npmVulnsAfter.length > 0,
-    npmVulnsAfter,
-    scanAfterSummary: locale.exec.scan_after_summary(pendingOriginal.length, phpAfterLabel, npmAfterLabel),
-    showComposerTests: composerTests === 'pass' && !!opts.composerUpdate?.tests_detail,
-    composerTestsDetail: opts.composerUpdate?.tests_detail ?? '',
-    showNpmBuild: npmBuildStatus === 'pass' && !!opts.npmUpdate?.build_detail,
-    buildVerified: opts.npmUpdate?.build_detail ? locale.exec.build_verified(opts.npmUpdate.build_detail) : '',
+    scanBeforeSummary: locale.exec.scan_summary(totalBefore, ecoBeforeLabels),
+    evidenceSections,
+    scanAfterSummary: locale.exec.scan_after_summary_generic(pendingOriginal.length, ecoAfterLabels),
     allFixed: fixedVulns.length > 0 && pendingOriginal.length === 0,
     pendingByPkg,
   };

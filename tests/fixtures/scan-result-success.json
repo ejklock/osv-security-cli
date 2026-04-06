@@ -3,23 +3,62 @@
   "agent": "osv-scanner",
   "status": "success",
   "environment": "docker",
-  "php": {
-    "vulnerabilities_total": 2,
-    "auto_safe": 1,
-    "breaking": 1,
-    "manual": 0,
-    "auto_safe_packages": ["vendor/safe-package@1.2.3"],
-    "breaking_packages": ["laravel/framework@10.0.0"],
-    "manual_packages": []
-  },
-  "npm": {
-    "vulnerabilities_total": 1,
-    "auto_safe": 1,
-    "breaking": 0,
-    "manual": 0,
-    "auto_safe_packages": ["lodash@4.17.20"],
-    "breaking_packages": [],
-    "manual_packages": []
+  "ecosystems": {
+    "composer": {
+      "vulnerabilities_total": 2,
+      "auto_safe": 1,
+      "breaking": 1,
+      "manual": 0,
+      "auto_safe_packages": ["vendor/safe-package@1.2.3"],
+      "breaking_packages": ["laravel/framework@10.0.0"],
+      "manual_packages": [],
+      "vulnerabilities": [
+        {
+          "ecosystem": "composer",
+          "package": "vendor/safe-package",
+          "currentVersion": "1.2.3",
+          "safeVersion": "1.2.4",
+          "cvss": "4.3",
+          "ghsaId": "GHSA-xxxx-yyyy-0001",
+          "risk": "medium",
+          "classification": "auto_safe",
+          "reason": "Patch version bump with no breaking changes"
+        },
+        {
+          "ecosystem": "composer",
+          "package": "laravel/framework",
+          "currentVersion": "10.0.0",
+          "safeVersion": null,
+          "cvss": "8.1",
+          "ghsaId": "GHSA-xxxx-yyyy-0002",
+          "risk": "high",
+          "classification": "breaking",
+          "reason": "Major version upgrade required; manual review needed"
+        }
+      ]
+    },
+    "npm": {
+      "vulnerabilities_total": 1,
+      "auto_safe": 1,
+      "breaking": 0,
+      "manual": 0,
+      "auto_safe_packages": ["lodash@4.17.20"],
+      "breaking_packages": [],
+      "manual_packages": [],
+      "vulnerabilities": [
+        {
+          "ecosystem": "npm",
+          "package": "lodash",
+          "currentVersion": "4.17.20",
+          "safeVersion": "4.17.21",
+          "cvss": "7.4",
+          "ghsaId": "GHSA-35jh-r3h4-6jhm",
+          "risk": "high",
+          "classification": "auto_safe",
+          "reason": "Patch upgrade resolves prototype pollution vulnerability"
+        }
+      ]
+    }
   },
   "error": null
 }

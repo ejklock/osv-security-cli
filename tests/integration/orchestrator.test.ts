@@ -65,7 +65,8 @@ describe('runOrchestrator — full pipeline', () => {
     const config = await loadTestConfig();
     const runner = new MockCommandRunner({
       '--version': { stdout: 'osv-scanner version 1.9.0', exitCode: 0 },
-      '--lockfile composer.lock --lockfile package-lock.json --format json': {
+      // npm plugin is registered before composer, so package-lock.json arg comes first
+      '--lockfile package-lock.json --lockfile composer.lock --format json': {
         stdout: JSON.stringify({ results: [] }),
         exitCode: 0,
       },
@@ -79,8 +80,8 @@ describe('runOrchestrator — full pipeline', () => {
     });
 
     expect(result.scan).not.toBeNull();
-    expect(result.npmUpdate).toBeNull();
-    expect(result.composerUpdate).toBeNull();
+    expect(result.updates['npm']).toBeUndefined();
+    expect(result.updates['composer']).toBeUndefined();
   });
 
   it('runs in dry-run mode without executing update commands', async () => {
@@ -110,7 +111,8 @@ describe('runOrchestrator — full pipeline', () => {
     const config = await loadTestConfig();
     const runner = new MockCommandRunner({
       '--version': { stdout: 'osv-scanner version 1.9.0', exitCode: 0 },
-      '--lockfile composer.lock --lockfile package-lock.json --format json': {
+      // npm plugin is registered before composer, so package-lock.json arg comes first
+      '--lockfile package-lock.json --lockfile composer.lock --format json': {
         stdout: JSON.stringify({ results: [] }),
         exitCode: 0,
       },
@@ -125,15 +127,16 @@ describe('runOrchestrator — full pipeline', () => {
     });
 
     expect(result.scan).not.toBeNull();
-    expect(result.npmUpdate).toBeNull();
-    expect(result.composerUpdate).toBeNull();
+    expect(result.updates['npm']).toBeUndefined();
+    expect(result.updates['composer']).toBeUndefined();
   });
 
   it('revert not called on successful npm update', async () => {
     const config = await loadTestConfig();
     const runner = new MockCommandRunner({
       '--version': { stdout: 'osv-scanner version 1.9.0', exitCode: 0 },
-      '--lockfile composer.lock --lockfile package-lock.json --format json': {
+      // npm plugin is registered before composer, so package-lock.json arg comes first
+      '--lockfile package-lock.json --lockfile composer.lock --format json': {
         stdout: JSON.stringify({ results: [] }),
         exitCode: 0,
       },

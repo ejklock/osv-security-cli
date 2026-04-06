@@ -1,7 +1,17 @@
 import { z } from 'zod';
 import type { GateResult } from '../types/common.js';
-import type { ScanResultJson } from '../types/scan.js';
-import type { UpdateResultJson } from '../types/update.js';
+
+const VulnerabilityEntrySchema = z.object({
+  ecosystem: z.string(),
+  package: z.string(),
+  currentVersion: z.string(),
+  safeVersion: z.string().nullable(),
+  cvss: z.string(),
+  ghsaId: z.string(),
+  risk: z.string(),
+  classification: z.enum(['auto_safe', 'breaking', 'manual']),
+  reason: z.string(),
+});
 
 const EcosystemScanResultSchema = z.object({
   vulnerabilities_total: z.number(),
@@ -11,6 +21,7 @@ const EcosystemScanResultSchema = z.object({
   auto_safe_packages: z.array(z.string()),
   breaking_packages: z.array(z.string()),
   manual_packages: z.array(z.string()),
+  vulnerabilities: z.array(VulnerabilityEntrySchema),
 });
 
 const ScanResultSchema = z.object({
@@ -18,22 +29,33 @@ const ScanResultSchema = z.object({
   agent: z.literal('osv-scanner'),
   status: z.enum(['success', 'error', 'skipped']),
   environment: z.enum(['docker', 'local']),
-  php: EcosystemScanResultSchema,
-  npm: EcosystemScanResultSchema,
+  ecosystems: z.record(z.string(), EcosystemScanResultSchema),
   error: z.string().nullable(),
+});
+
+/**
+ * Schema for a single canonical validation step entry.
+ * Mirrors the ValidationEntry interface in types/update.ts.
+ */
+const ValidationEntrySchema = z.object({
+  name: z.string(),
+  status: z.enum(['pass', 'fail', 'skipped']),
+  detail: z.string().optional(),
 });
 
 const UpdateResultSchema = z.object({
   $schema: z.literal('osv-update-result/v1'),
-  agent: z.enum(['composer-safe-update', 'npm-safe-update']),
+  agent: z.string(),
   status: z.enum(['success', 'error', 'skipped']),
   packages_updated: z.array(z.string()),
   packages_skipped: z.array(z.string()),
   packages_pending_breaking: z.array(z.string()),
-  tests: z.enum(['pass', 'fail', 'skipped']),
-  tests_detail: z.string(),
-  build_status: z.enum(['pass', 'fail', 'skipped']).optional(),
-  build_detail: z.string().optional(),
+  /**
+   * Canonical validation steps array — required and must be non-empty.
+   * All ecosystem plugins must emit at least one entry (pass / fail / skipped).
+   * An empty array is a contract violation and will fail schema validation.
+   */
+  validations: z.array(ValidationEntrySchema).min(1),
   error: z.string().nullable(),
 });
 
@@ -56,65 +78,30 @@ export function validateGateA(data: unknown): GateResult {
   return { valid: true, gate: 'A', errors: [] };
 }
 
-export function validateGateB(data: unknown): GateResult {
-  const result = UpdateResultSchema.safeParse(data);
-  if (!result.success) {
-    return {
-      valid: false,
-      gate: 'B',
-      errors: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-    };
-  }
-  if (result.data.agent !== 'npm-safe-update') {
-    return {
-      valid: false,
-      gate: 'B',
-      errors: [`Expected agent "npm-safe-update", got "${result.data.agent}"`],
-    };
-  }
-  if (result.data.status === 'error') {
-    return {
-      valid: false,
-      gate: 'B',
-      errors: [`npm updater returned error: ${result.data.error ?? 'unknown'}`],
-    };
-  }
-  return { valid: true, gate: 'B', errors: [] };
-}
-
-export function validateGateC(data: unknown): GateResult {
-  const result = UpdateResultSchema.safeParse(data);
-  if (!result.success) {
-    return {
-      valid: false,
-      gate: 'C',
-      errors: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-    };
-  }
-  if (result.data.agent !== 'composer-safe-update') {
-    return {
-      valid: false,
-      gate: 'C',
-      errors: [`Expected agent "composer-safe-update", got "${result.data.agent}"`],
-    };
-  }
-  if (result.data.status === 'error') {
-    return {
-      valid: false,
-      gate: 'C',
-      errors: [`Composer updater returned error: ${result.data.error ?? 'unknown'}`],
-    };
-  }
-  return { valid: true, gate: 'C', errors: [] };
-}
-
-export function validateScanResult(data: ScanResultJson): GateResult {
-  return validateGateA(data);
-}
-
-export function validateUpdateResult(
-  data: UpdateResultJson,
-  gate: 'B' | 'C',
+/**
+ * Generic ecosystem gate validator.
+ * Validates the UpdateResultJson schema and checks for error status.
+ * Does NOT enforce a specific agent name — that is the caller's responsibility.
+ * Used by the orchestrator when iterating over registered plugins.
+ */
+export function validateEcosystemGate(
+  ecosystemId: string,
+  data: unknown,
 ): GateResult {
-  return gate === 'B' ? validateGateB(data) : validateGateC(data);
+  const result = UpdateResultSchema.safeParse(data);
+  if (!result.success) {
+    return {
+      valid: false,
+      gate: ecosystemId,
+      errors: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+    };
+  }
+  if (result.data.status === 'error') {
+    return {
+      valid: false,
+      gate: ecosystemId,
+      errors: [`${ecosystemId} updater returned error: ${result.data.error ?? 'unknown'}`],
+    };
+  }
+  return { valid: true, gate: ecosystemId, errors: [] };
 }

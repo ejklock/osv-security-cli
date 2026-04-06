@@ -8,8 +8,8 @@ export interface ConsolidatedReport {
   date: string;
   environment: string;
   scan: ScanResultJson;
-  npmUpdate: UpdateResultJson | null;
-  composerUpdate: UpdateResultJson | null;
+  /** Update results keyed by plugin id (e.g. 'npm', 'composer') */
+  updates: Record<string, UpdateResultJson>;
   overallStatus: PhaseStatus;
   locale?: SupportedLocale;
 }
@@ -19,7 +19,7 @@ export interface ExecutiveReportOptions {
   project: string;
   scanBefore: ScanResultJson;
   scanAfter: ScanResultJson;
-  npmUpdate: UpdateResultJson | null;
-  composerUpdate: UpdateResultJson | null;
+  /** Update results keyed by plugin id (e.g. 'npm', 'composer') */
+  updates: Record<string, UpdateResultJson>;
   locale?: SupportedLocale;
 }
